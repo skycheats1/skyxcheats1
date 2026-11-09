@@ -5,7 +5,7 @@
 //   user     -> sends the amount -> sends the eSewa transaction code
 //   bot      -> creates the same QR top-up request as the website, the admin bot gets Load / Cancel buttons
 // Env: TELEGRAM_DEPOSIT_BOT_TOKEN (required), PUBLIC_BACKEND_URL (https, webhook),
-//      SITE_URL (where /assets/img/srtx-pay-qr.jpg is served, default https://vexorastore.ct.ws),
+//      SITE_URL (where /assets/img/sky-pay-qr.jpg is served, default https://vexorastore.ct.ws),
 //      TELEGRAM_DEPOSIT_WEBHOOK_SECRET (optional), DEPOSIT_QR_URL (optional, full URL of the QR image).
 import crypto from 'node:crypto';
 import { db } from './firebase.js';
@@ -143,7 +143,7 @@ function allow(id, max, windowMs) {
 }
 
 const qrUrl = () => process.env.DEPOSIT_QR_URL
-  || `${String(process.env.SITE_URL || 'https://vexorastore.ct.ws').replace(/\/+$/, '')}/assets/img/srtx-pay-qr.jpg`;
+  || `${String(process.env.SITE_URL || 'https://vexorastore.ct.ws').replace(/\/+$/, '')}/assets/img/sky-pay-qr.jpg`;
 
 const INTRO =
   '👋 <b>SKY CHEATS — Deposit bot</b>\n' +
@@ -214,7 +214,7 @@ async function onStartLink(chat, tgId, token) {
   // store QR + welcome + amount question
   const caption = `Welcome to SKY CHEATS\n${LONG}\n${ASK_AMOUNT}`;
   const qr = await fetchQr();
-  const photo = qr ? await apiUpload('sendPhoto', { chat_id: chat, caption }, 'photo', qr.buf, 'srtx-pay-qr.jpg', qr.contentType) : null;
+  const photo = qr ? await apiUpload('sendPhoto', { chat_id: chat, caption }, 'photo', qr.buf, 'sky-pay-qr.jpg', qr.contentType) : null;
   if (!photo?.ok) await say(chat, `Welcome to SKY CHEATS\n(Could not load the QR image right now — open the website → Add Balance → Pay with QR.)\n${LONG}\n${ASK_AMOUNT}`);
 }
 

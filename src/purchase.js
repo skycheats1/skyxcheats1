@@ -5,9 +5,9 @@ import admin from 'firebase-admin';
 // src by SKY CHEATS. Copy right SKY CHEATS
 import { asyncHandler } from '../src/asyncHandler.js';
 import { db, requireFirebaseUid, userCors } from '../src/firebase.js';
-import { catalogFind, getMaintenanceForSku, findCustomProductFresh, invalidateMaintenanceCache } from '../src/srt_storage_product.js';
+import { catalogFind, getMaintenanceForSku, findCustomProductFresh } from '../src/srt_storage_product.js';
 import { telegramNotify, telegramFormat } from '../src/telegram.js';
-import { stockRef, takeKeyInTx, StockError, notifySoldOut, notifyEmptyAttempt } from '../src/keyStock.js';
+import { fetchRealKeys, makeRequestId, UpstreamError } from '../src/upstream.js';
 // src by SKY CHEATS. Copy right SKY CHEATS
 import { invalidateUserDoc } from '../src/userCache.js';
 import { leaderboardCache } from '../src/sharedCaches.js';
@@ -70,11 +70,6 @@ router.post('/checkout/start', asyncHandler(async (req, res) => {
   }
   if (product.type === 'manual') {
     return res.status(400).json({ success: false, error: 'This product is ordered via WhatsApp, not instant checkout.' });
-  }
-  // Manual key stock: no keys left for this duration -> out of stock (and tell the admin in Telegram).
-  if (!(Number(liveStatus.stockCount) > 0)) {
-    notifyEmptyAttempt(sku, product);
-    return res.status(409).json({ success: false, code: 'OUT_OF_STOCK', error: 'This duration is out of stock. Please check back soon.' });
   }
 
   // src by SKY CHEATS. Copy right SKY CHEATS
@@ -208,7 +203,9 @@ async function runCheckoutJob(jobId, uid, email, sku, buyerName, buyerWa, androi
   let role = 'user';
   let product = null;
   let realPrice = 0;
-  const requestId = `sky-${String(jobId).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 60)}`; // order reference shown in logs
+  let debited = false;
+  let pendingReview = false;
+  const requestId = makeRequestId(jobId); // unique per order; reused on every supplier retry
 
   // src by SKY CHEATS. Copy right SKY CHEATS
   try {
@@ -255,38 +252,55 @@ async function runCheckoutJob(jobId, uid, email, sku, buyerName, buyerWa, androi
     // src by SKY CHEATS. Copy right SKY CHEATS
     setJob(jobId, { percent: 35, label: 'Checking balance...' });
 
-    // STEP 1 - ONE atomic transaction: take the money AND the oldest key from this duration's manual stock.
-    // Either both happen or neither does, so there is nothing to refund and a key can never be sold twice.
-    setJob(jobId, { percent: 55, label: 'Reserving your key...' });
-    let sale;
-    try {
-      sale = await db().runTransaction(async (tx) => {
-        const [userSnap, stockSnap] = await Promise.all([tx.get(userRef), tx.get(stockRef(sku))]);
-        const currentBalance = userSnap.exists ? Number(userSnap.data().balance || 0) : 0;
-        if (currentBalance < realPrice) {
-          throw new Error('Please top up first then trying 🙏');
-        }
-        const { key: takenKey, remaining } = takeKeyInTx(tx, sku, stockSnap);
-        tx.set(userRef, { balance: currentBalance - realPrice }, { merge: true });
-        return { key: takenKey, remaining, currentBalance, newBalance: currentBalance - realPrice };
-      });
-    } catch (e) {
-      if (e instanceof StockError && e.code === 'OUT_OF_STOCK') {
-        invalidateMaintenanceCache(); // the store must show "out of stock" right away
-        notifyEmptyAttempt(sku, product);
-        throw new Error('This duration is out of stock. Please check back soon.');
+    // STEP 1 - debit first (atomic). The supplier call is NOT inside a Firestore transaction any more, so a
+    // transaction retry can never buy a second key and a failed commit can never lose a key that was bought.
+    const debit = await db().runTransaction(async (tx) => {
+      const snap = await tx.get(userRef);
+      const currentBalance = snap.exists ? Number(snap.data().balance || 0) : 0;
+      if (currentBalance < realPrice) {
+        throw new Error('Please top up first then trying 🙏');
       }
-      throw e;
-    }
-    const key = sale.key;
-    const debit = { currentBalance: sale.currentBalance, newBalance: sale.newBalance };
+      tx.set(userRef, { balance: currentBalance - realPrice }, { merge: true });
+      return { currentBalance, newBalance: currentBalance - realPrice };
+    });
+    debited = true;
     try { invalidateUserDoc(uid, { history: false }); } catch (_) { /* cache only */ }
-    if (sale.remaining <= 0) {
-      invalidateMaintenanceCache();        // flip the store to "out of stock"
-      notifySoldOut(sku, product);         // Telegram -> admin: add stock
+
+    // STEP 2 - buy from the supplier. One request_id per order, reused on every retry (the supplier will not sell twice).
+    let key;
+    try {
+      setJob(jobId, { percent: 55, label: 'Connecting to server...' });
+      const keys = await fetchRealKeys(product, androidId, {
+        quantity: 1,
+        requestId,
+        onRetry: () => setJob(jobId, { percent: 65, label: 'Server busy, retrying...' }),
+      });
+      key = keys[0];
+    } catch (e) {
+      if (e instanceof UpstreamError && e.charged === 'no') {
+        // Supplier guarantees nothing was charged -> give the money back right away.
+        await refundDebit(userRef, realPrice, `Auto-refund: ${e.code}`);
+        debited = false;
+        try { invalidateUserDoc(uid, { history: false }); } catch (_) { /* cache only */ }
+        notifyPurchase('Supplier error (auto-refunded)', {
+          username: buyerName || email, email, phone: buyerWa, product: product.name, duration: product.duration,
+          price: realPrice, uid, status: 'failed', others: `${e.code} HTTP ${e.status} ${e.detail || ''} | request_id ${requestId}`,
+        });
+        throw new Error(e.message);
+      }
+      // charged === 'maybe' (timeout / unreadable / 5xx after all retries): the supplier may have created the order.
+      // Do NOT refund automatically (that could hand out a free key) and do NOT take the money twice: keep the debit and
+      // ask the admin to check request_id on the supplier panel, then refund or deliver by hand.
+      pendingReview = true;
+      notifyPurchase('ORDER NEEDS REVIEW (money held)', {
+        username: buyerName || email, email, phone: buyerWa, product: product.name, duration: product.duration,
+        price: realPrice, uid, status: 'failed',
+        others: `${e.code || 'ERROR'} ${e.detail || e.message} | request_id ${requestId} | balance already debited - check the supplier order, then refund or deliver manually`,
+      });
+      throw new Error('Your order is being verified with the supplier. If no key arrives shortly your balance will be refunded - contact support with order ' + requestId);
     }
 
-    // STEP 2 - record the delivered key. arrayUnion/increment need no read, so this cannot conflict.
+    // STEP 3 - record the delivered key. arrayUnion/increment need no read, so this cannot conflict.
     setJob(jobId, { percent: 90, label: 'Finalizing order...' });
     const historyEntry = {
       at: new Date().toISOString(), sku, row: product.row, name: product.name, duration: product.duration,
@@ -320,12 +334,27 @@ async function runCheckoutJob(jobId, uid, email, sku, buyerName, buyerWa, androi
   } catch (e) {
     setJob(jobId, { percent: 100, done: true, success: false, error: e.message, label: 'Failed' });
 
+    // Safety net: if we debited and something unexpected threw before the supplier answered, hand the money back.
+    if (debited && !pendingReview) {
+      try { await refundDebit(userRef, realPrice, 'Auto-refund: purchase failed'); invalidateUserDoc(uid, { history: false }); }
+      catch (re) { console.error('[purchase] REFUND FAILED', uid, realPrice, requestId, re?.message || re); }
+    }
     notifyPurchase('Purchase rejected', {
       username: buyerName || email, email, phone: buyerWa, product: product ? product.name : sku,
       duration: product ? product.duration : '', price: realPrice, uid, status: 'failed',
       others: `${e.message} (role: ${role}) request_id ${requestId}`,
     });
   }
+}
+
+// Give a debit back (balance only - counters are only touched on success).
+async function refundDebit(userRef, amount, note) {
+  await db().runTransaction(async (tx) => {
+    const snap = await tx.get(userRef);
+    const cur = snap.exists ? Number(snap.data().balance || 0) : 0;
+    tx.set(userRef, { balance: cur + amount }, { merge: true });
+  });
+  console.log('[purchase] refunded', amount, '-', note);
 }
 
 export default router;
