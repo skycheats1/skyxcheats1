@@ -16,7 +16,6 @@ import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
 import purchaseRoutes from './routes/purchase.js';
 import rewardsRoutes from './routes/rewards.js';
-import shopsrcRoutes, { fileRouter as shopsrcFileRouter } from './routes/shopsrc.js';
 import supportRoutes from './routes/support.js';
 import gloryRoutes from './routes/gulaa_bot.js';
 import adminRoutes from './routes/srt_x_owner.js';
@@ -59,8 +58,6 @@ app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/purchase', purchaseRoutes);
 app.use('/api/rewards', rewardsRoutes);
-app.use('/api/shopsrc', shopsrcRoutes);
-app.use('/api/shopsrc-file', shopsrcFileRouter);
 app.use('/api/support', supportRoutes);
 app.use('/api/glory', gloryRoutes);
 app.use('/api/admin', adminRoutes);
@@ -72,7 +69,10 @@ app.use((req, res) => res.status(404).json({ success: false, error: 'Not found' 
 app.use((err, req, res, _next) => {
   console.error('[server] error:', redact(err?.stack || err?.message || err).slice(0, 500));
   if (res.headersSent) return;
-  res.status(err?.status || 500).json({ success: false, error: err?.status && err.status < 500 ? err.message : 'Server error' });
+  const known = err?.status && err.status < 500;
+  // TEMPORARY DIAGNOSTIC: shows the real reason in the browser. Set SHOW_ERROR_DETAIL=0 on Render to hide it again.
+  const detail = process.env.SHOW_ERROR_DETAIL === '0' ? '' : redact(err?.message || err).replace(/\s+/g, ' ').slice(0, 220);
+  res.status(err?.status || 500).json({ success: false, error: known ? err.message : (detail ? `Server error: ${detail}` : 'Server error') });
 });
 
 process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', redact(e?.stack || e).slice(0, 500)));
