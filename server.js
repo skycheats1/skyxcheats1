@@ -48,7 +48,13 @@ app.use('/api', rateLimit({ windowMs: 60_000, max: 180, name: 'api' }));
 
 // Public (no login) catalog + leaderboard used by the store/dashboard pages.
 app.get('/api/catalog', userCors, asyncHandler(async (_req, res) => {
-  res.json({ success: true, catalog: await getLiveCatalog('user') });
+  try {
+    res.json({ success: true, catalog: await getLiveCatalog('user') });
+  } catch (e) {
+    // Never break the whole store page: log the real reason (see Render logs) and show an empty catalog.
+    console.error('[catalog] FAILED:', redact(e?.stack || e?.message || e).slice(0, 800));
+    res.json({ success: true, catalog: {}, degraded: true });
+  }
 }));
 app.get('/api/leaderboard', userCors, asyncHandler(async (_req, res) => {
   res.json({ success: true, leaderboard: await leaderboardCache.get() });
