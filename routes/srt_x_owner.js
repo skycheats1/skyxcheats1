@@ -11,7 +11,9 @@ import { telegramNotify, telegramFormat, esc } from '../src/telegram.js';
 import admin from 'firebase-admin';
 // src by SKY CHEATS. Copy right SKY CHEATS
 import { notifyBalanceChange } from '../src/balanceAlerts.js';
-import { addKeys, removeKey, listKeys, cleanKeys, StockError, statusRef, stockRef, MAX_KEYS_PER_ADD } from '../src/keyStock.js';
+import { normDuration, apiLabel, API_DURATION_RE, findLabelConflict } from '../src/apiMatch.js';
+import { loadPidProducts } from '../src/resellerApiCatalog.js';
+import { fetchSupplierProducts, annotateFeed, planImport, cleanMarkups, SupplierFeedError } from '../src/supplierCatalog.js';
 import { invalidateUserDoc, invalidateAllUserDocs } from '../src/userCache.js';
 // src by SKY CHEATS. Copy right SKY CHEATS
 import { announcementCache, announcementListCache, policyCache, leaderboardCache } from '../src/sharedCaches.js';
@@ -324,38 +326,46 @@ router.post('/backfill-stats', asyncHandler(async (req, res) => {
 // src by SKY CHEATS. Copy right SKY CHEATS
 
 router.get('/products', asyncHandler(async (req, res) => {
-  const [overrides, liveCatalog, statusSnap] = await Promise.all([
-    getMaintenanceOverrides(), getLiveCatalog('user'), db().collection('productStatus').get(),
-  ]);
-  // Fresh stock counts (the catalog cache only needs to know "zero or not").
-  const stockCounts = {};
-  statusSnap.forEach((d) => { stockCounts[d.id] = Math.max(0, Math.floor(Number(d.data().stockCount) || 0)); });
-  const skus = Object.keys(liveCatalog);
+  const [overrides, liveCatalog] = await Promise.all([getMaintenanceOverrides(), getLiveCatalog('user')]);
+  const skus = Object.keys(liveCatalog).filter((sku) => !['whatsapp', 'shopsrc'].includes(liveCatalog[sku].type));
+
+  // src by SKY CHEATS. Copy right SKY CHEATS
+  const labelCount = {};
+  for (const sku of skus) {
+    const k = `${String(liveCatalog[sku].pid ?? '').trim()}|${normDuration(apiLabel(liveCatalog[sku]))}`;
+    labelCount[k] = (labelCount[k] || 0) + 1;
+  }
+// src by SKY CHEATS. Copy right SKY CHEATS
 
   const products = skus.map((sku) => {
     const p = liveCatalog[sku];
     const pr = CATALOG_RESELLER[sku] || p;
     const o = overrides[sku];
+    // src by SKY CHEATS. Copy right SKY CHEATS
     const maintenance = o ? !!o.maintenance : !!p.maintenance;
     const maintenanceMessage = maintenance
       ? (o?.maintenanceMessage || p.maintenanceMessage || 'This product is temporarily under maintenance.')
       : null;
-    const stockCount = stockCounts[sku] || 0;
-    const outOfStock = !!p.outOfStock || stockCount <= 0;
-    const outOfStockMessage = outOfStock ? (p.outOfStockMessage || 'This duration is out of stock.') : null;
+    const outOfStock = !!p.outOfStock;
+    // src by SKY CHEATS. Copy right SKY CHEATS
+    const outOfStockMessage = outOfStock ? (p.outOfStockMessage || 'Out of stock — check back soon.') : null;
     return {
       sku, pid: p.pid, row: p.row, name: p.name, duration: p.duration, image: p.image,
       price: p.price, priceReseller: CATALOG[sku] ? pr.price : (p.priceReseller ?? p.price),
       priceProReseller: CATALOG[sku] ? (CATALOG_PRO[sku]?.price ?? o?.priceProReseller ?? pr.price) : (p.priceProReseller ?? p.priceReseller ?? p.price),
+      // src by SKY CHEATS. Copy right SKY CHEATS
       downloadLink: p.downloadLink || '',
       tags: Array.isArray(p.tags) ? p.tags : [],
-      stockCount,
+      apiDuration: p.apiDuration || '', apiLabel: apiLabel(p),
+      apiConflict: labelCount[`${String(p.pid ?? '').trim()}|${normDuration(apiLabel(p))}`] > 1,
       maintenance, maintenanceMessage, outOfStock, outOfStockMessage,
+      // src by SKY CHEATS. Copy right SKY CHEATS
       custom: !CATALOG[sku],
     };
   });
 
   res.json({ success: true, products });
+// src by SKY CHEATS. Copy right SKY CHEATS
 }));
 
 router.post('/products/:sku/maintenance', asyncHandler(async (req, res) => {
@@ -416,112 +426,142 @@ function normalizeTags(input) {
 }
 
 // src by SKY CHEATS. Copy right SKY CHEATS
-// Short url-safe id for a product line (used inside the sku). No supplier "pid" is needed any more.
-const slug = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'p';
-
 router.post('/products/create', asyncHandler(async (req, res) => {
   const image = String(req.body?.image || '').trim();
   const row = String(req.body?.row || '').trim();
-  const pid = String(req.body?.pid || '').trim() || slug(row);
+  const pid = String(req.body?.pid || '').trim();
   const tags = normalizeTags(req.body?.tags);
+  // src by SKY CHEATS. Copy right SKY CHEATS
   const durations = Array.isArray(req.body?.durations) ? req.body.durations : [];
 
-  if (!image) return res.status(400).json({ success: false, error: 'Product image is required' });
+  if (!image) return res.status(400).json({ success: false, error: 'Image link is required' });
   if (!row) return res.status(400).json({ success: false, error: 'Product full name is required' });
+  if (!pid) return res.status(400).json({ success: false, error: 'Pid is required' });
+  // src by SKY CHEATS. Copy right SKY CHEATS
   if (!tags.length) return res.status(400).json({ success: false, error: `Select at least one tag (${VALID_TAGS.join(', ')})` });
   if (!durations.length) return res.status(400).json({ success: false, error: 'Add at least one duration + price' });
   if (durations.length > 20) return res.status(400).json({ success: false, error: 'Too many durations in one go — split it up' });
 
   let downloadLink;
+  // src by SKY CHEATS. Copy right SKY CHEATS
   try {
     downloadLink = normalizeUrlField(req.body?.downloadLink, 'Download link', { maxLen: 500 });
   } catch (e) {
     if (e instanceof RuleError) return res.status(e.status).json({ success: false, error: e.message });
     throw e;
+  // src by SKY CHEATS. Copy right SKY CHEATS
+  }
+
+  const existingForPid = await loadPidProducts(pid);
+  const seenLabels = new Set();
+  for (let i = 0; i < durations.length; i++) {
+    // src by SKY CHEATS. Copy right SKY CHEATS
+    const d = durations[i];
+    const apiDur = String(d?.apiDuration || '').trim();
+    if (apiDur && !API_DURATION_RE.test(apiDur)) {
+      return res.status(400).json({ success: false, error: `Duration #${i + 1}: API duration may only use letters, numbers, spaces and _ . + - (max 40 characters)` });
+    }
+    // src by SKY CHEATS. Copy right SKY CHEATS
+    const label = apiDur || String(d?.duration || '').trim();
+    const norm = normDuration(label);
+    if (norm && seenLabels.has(norm)) {
+      return res.status(400).json({ success: false, error: `Duration #${i + 1}: "${label}" is the same API duration as another row in this product — each duration needs a different one` });
+    }
+    // src by SKY CHEATS. Copy right SKY CHEATS
+    seenLabels.add(norm);
+    const clash = findLabelConflict(existingForPid, pid, label);
+    if (clash) {
+      return res.status(400).json({ success: false, error: `Duration #${i + 1}: pid ${pid} already has "${apiLabel(clash)}" (${clash.name}). The reseller API couldn't tell them apart — set a different API duration.` });
+    }
+  // src by SKY CHEATS. Copy right SKY CHEATS
   }
 
   const batch = db().batch();
   const created = [];
-  const seenNames = new Set();
 
+  // src by SKY CHEATS. Copy right SKY CHEATS
   for (let i = 0; i < durations.length; i++) {
     const d = durations[i];
     const name = String(d?.name || '').trim();
     const duration = String(d?.duration || '').trim();
+    const apiDuration = String(d?.apiDuration || '').trim();
+    // src by SKY CHEATS. Copy right SKY CHEATS
     const price = Number(d?.price);
     const priceReseller = d?.priceReseller !== undefined && d?.priceReseller !== '' ? Number(d.priceReseller) : price;
     const priceProReseller = d?.priceProReseller !== undefined && d?.priceProReseller !== '' ? Number(d.priceProReseller) : priceReseller;
     if (!name || !duration) return res.status(400).json({ success: false, error: `Duration #${i + 1}: name and duration label are required` });
     if (!price || price <= 0) return res.status(400).json({ success: false, error: `Duration #${i + 1}: user price must be a positive number` });
+    // src by SKY CHEATS. Copy right SKY CHEATS
     if (!priceReseller || priceReseller <= 0) return res.status(400).json({ success: false, error: `Duration #${i + 1}: reseller price must be a positive number` });
     if (!priceProReseller || priceProReseller <= 0) return res.status(400).json({ success: false, error: `Duration #${i + 1}: pro reseller price must be a positive number` });
-    const dupKey = duration.toLowerCase().replace(/\s+/g, ' ');
-    if (seenNames.has(dupKey)) return res.status(400).json({ success: false, error: `Duration #${i + 1}: "${duration}" is listed twice in this product` });
-    seenNames.add(dupKey);
-
-    let keys;
-    try { keys = cleanKeys(d?.keys); } catch (e) {
-      if (e instanceof StockError) return res.status(e.status).json({ success: false, error: `Duration #${i + 1}: ${e.message}` });
-      throw e;
-    }
-    if (keys.length > MAX_KEYS_PER_ADD) return res.status(400).json({ success: false, error: `Duration #${i + 1}: add at most ${MAX_KEYS_PER_ADD} keys at a time` });
 
     const sku = `custom_${pid}_${i + 1}_${Date.now().toString(36)}`;
-    const product = { pid, row, name, duration, price, priceReseller, priceProReseller, image, tags, createdAt: Date.now(), ...(downloadLink ? { downloadLink } : {}) };
+    const product = { pid, row, name, duration, price, priceReseller, priceProReseller, image, tags, createdAt: Date.now(), ...(apiDuration ? { apiDuration } : {}), ...(downloadLink ? { downloadLink } : {}) };
+    // src by SKY CHEATS. Copy right SKY CHEATS
     batch.set(db().collection('customProducts').doc(sku), product);
-    // Manual stock for this duration (may be empty -> shows "out of stock" until keys are added).
-    batch.set(stockRef(sku), { keys, added: keys.length, sold: 0, updatedAt: Date.now(), soldOutNotified: false });
-    batch.set(statusRef(sku), { stockCount: keys.length, updatedAt: Date.now() }, { merge: true });
-    created.push({ sku, ...product, stockCount: keys.length });
+    created.push({ sku, ...product });
   }
 
   await batch.commit();
+  // src by SKY CHEATS. Copy right SKY CHEATS
   invalidateCustomProductCache();
-  invalidateMaintenanceCache();
   res.json({ success: true, row, products: created });
 }));
 
-// ---- Manual key stock (per product duration = per sku) ----
-async function skuExists(sku) {
-  if (CATALOG[sku]) return true;
-  const live = await getLiveCatalog('user');
-  const p = live[sku];
-  return !!p && p.type !== 'manual';
+// ---- Auto add products from the supplier feed (PI API) ----
+async function allCustomProductsFresh() {
+  const snap = await db().collection('customProducts').get();
+  return snap.docs.map((d) => ({ sku: d.id, ...d.data() }));
 }
-const stockFail = (res, e) => {
-  if (e instanceof StockError) return res.status(e.status).json({ success: false, error: e.message });
-  throw e;
-};
 
-router.get('/products/:sku/stock', asyncHandler(async (req, res) => {
-  const sku = String(req.params.sku || '').trim();
-  if (!(await skuExists(sku))) return res.status(404).json({ success: false, error: 'Unknown sku' });
-  res.json({ success: true, sku, ...(await listKeys(sku)) });
+router.get('/products/supplier', asyncHandler(async (req, res) => {
+  try {
+    const [feed, existing] = await Promise.all([fetchSupplierProducts(), allCustomProductsFresh()]);
+    res.json({ success: true, products: annotateFeed(feed, existing) });
+  } catch (e) {
+    if (e instanceof SupplierFeedError) return res.status(e.status).json({ success: false, error: e.message });
+    throw e;
+  }
 }));
 
-router.post('/products/:sku/stock/add', asyncHandler(async (req, res) => {
-  const sku = String(req.params.sku || '').trim();
-  if (!(await skuExists(sku))) return res.status(404).json({ success: false, error: 'Unknown sku' });
-  try {
-    const r = await addKeys(sku, req.body?.keys);
-    res.json({ success: true, sku, ...r });
-  } catch (e) { stockFail(res, e); }
-}));
+router.post('/products/supplier/import', asyncHandler(async (req, res) => {
+  const pids = [...new Set((Array.isArray(req.body?.pids) ? req.body.pids : []).map((p) => String(p ?? '').trim()).filter(Boolean))];
+  const tags = normalizeTags(req.body?.tags);
+  const markups = cleanMarkups(req.body?.markups);
+  if (!pids.length) return res.status(400).json({ success: false, error: 'Pick at least one product to add' });
+  if (pids.length > 100) return res.status(400).json({ success: false, error: 'Too many products in one go — add them in smaller groups' });
+  if (!tags.length) return res.status(400).json({ success: false, error: `Select at least one tag (${VALID_TAGS.join(', ')})` });
+  if (!markups) return res.status(400).json({ success: false, error: 'Markup must be a number between 0 and 1000 (%)' });
 
-router.post('/products/:sku/stock/remove', asyncHandler(async (req, res) => {
-  const sku = String(req.params.sku || '').trim();
-  if (!(await skuExists(sku))) return res.status(404).json({ success: false, error: 'Unknown sku' });
+  let plan;
   try {
-    const r = await removeKey(sku, req.body?.key);
-    res.json({ success: true, sku, ...r });
-  } catch (e) { stockFail(res, e); }
+    const [feed, existing] = await Promise.all([fetchSupplierProducts(), allCustomProductsFresh()]);
+    plan = planImport({ feed, pids, existing, tags, markups });
+  } catch (e) {
+    if (e instanceof SupplierFeedError) return res.status(e.status).json({ success: false, error: e.message });
+    throw e;
+  }
+  if (plan.docs.length > 400) return res.status(400).json({ success: false, error: 'That is too many durations at once — add fewer products' });
+
+  if (plan.docs.length) {
+    const batch = db().batch();
+    for (const { sku, doc } of plan.docs) batch.set(db().collection('customProducts').doc(sku), doc);
+    await batch.commit();
+    invalidateCustomProductCache();
+  }
+  res.json({
+    success: true,
+    added: plan.docs.length,
+    products: [...new Set(plan.docs.map((d) => d.doc.row))],
+    skipped: plan.skipped.length, skippedDetail: plan.skipped.slice(0, 50), notInFeed: plan.missing,
+  });
 }));
 
 router.post('/products/:sku/edit', asyncHandler(async (req, res) => {
   // src by SKY CHEATS. Copy right SKY CHEATS
   const sku = String(req.params.sku || '').trim();
   const fields = {};
-  for (const key of ['image', 'name', 'duration']) {
+  for (const key of ['image', 'name', 'duration', 'pid']) {
     if (req.body?.[key] !== undefined) {
       const v = String(req.body[key]).trim();
       // src by SKY CHEATS. Copy right SKY CHEATS
@@ -553,6 +593,12 @@ router.post('/products/:sku/edit', asyncHandler(async (req, res) => {
     if (!v.length) return res.status(400).json({ success: false, error: `Select at least one tag (${VALID_TAGS.join(', ')})` });
     fields.tags = v;
   }
+  if (req.body?.apiDuration !== undefined) {
+    // src by SKY CHEATS. Copy right SKY CHEATS
+    const v = String(req.body.apiDuration).trim();
+    if (v && !API_DURATION_RE.test(v)) return res.status(400).json({ success: false, error: 'API duration may only use letters, numbers, spaces and _ . + - (max 40 characters)' });
+    fields.apiDuration = v;
+  }
   if (req.body?.downloadLink !== undefined) {
     // src by SKY CHEATS. Copy right SKY CHEATS
     try {
@@ -567,6 +613,15 @@ router.post('/products/:sku/edit', asyncHandler(async (req, res) => {
 
   const custom = await getCustomProductRaw(sku);
 // src by SKY CHEATS. Copy right SKY CHEATS
+
+  if (custom && ['pid', 'duration', 'apiDuration'].some((k) => fields[k] !== undefined && fields[k] !== (custom[k] ?? ''))) {
+    const merged = { ...custom, ...fields };
+    const clash = findLabelConflict(await loadPidProducts(merged.pid), merged.pid, apiLabel(merged), sku);
+    if (clash) {
+      // src by SKY CHEATS. Copy right SKY CHEATS
+      return res.status(400).json({ success: false, error: `pid ${merged.pid} already has "${apiLabel(clash)}" (${clash.name}). The reseller API couldn't tell them apart — use a different API duration.` });
+    }
+  }
 
   if (custom) {
     // src by SKY CHEATS. Copy right SKY CHEATS
@@ -593,7 +648,6 @@ router.post('/products/:sku/delete', asyncHandler(async (req, res) => {
   if (!custom) return res.status(404).json({ success: false, error: 'Unknown sku' });
 
   await deleteCustomProduct(sku);
-  await stockRef(sku).delete().catch(() => {});
   // src by SKY CHEATS. Copy right SKY CHEATS
   await db().collection('productStatus').doc(sku).delete().catch(() => {});
   invalidateMaintenanceCache();
@@ -605,7 +659,7 @@ function generateRedeemCode() {
   // src by SKY CHEATS. Copy right SKY CHEATS
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const group = (n) => Array.from({ length: n }, () => chars[crypto.randomInt(chars.length)]).join('');
-  return `SRT_${group(5)}_${group(5)}CHEATS`;
+  return `SKY_${group(5)}_${group(5)}CHEATS`;
 }
 
 // src by SKY CHEATS. Copy right SKY CHEATS
