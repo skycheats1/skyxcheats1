@@ -1,0 +1,329 @@
+// src by SKY CHEATS. Copy right SKY CHEATS
+import crypto from 'node:crypto';
+import { db } from './firebase.js';
+import { esc, formatNepaliDateTime } from './telegram.js';
+import { makeBan } from './ban.js';
+// src by SKY CHEATS. Copy right SKY CHEATS
+import { invalidateUserDoc } from './userCache.js';
+import { depositUpdate } from './proTier.js';
+
+export const QR_MIN_AMOUNT = 100;
+export const QR_MAX_AMOUNT = 100000;
+// src by SKY CHEATS. Copy right SKY CHEATS
+export const QR_MAX_PENDING = 3;
+export const QR_PENDING_WINDOW_MS = 30 * 60_000;
+export const QR_METHOD = 'QR';
+
+export const botToken = () => process.env.TELEGRAM_TOPUP_AUTO_BOT || '';
+// src by SKY CHEATS. Copy right SKY CHEATS
+export function chatIds() {
+  const pick = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
+  const own = pick(process.env.TELEGRAM_TOPUP_AUTO_CHAT_ID);
+  if (own.length) return own;
+  const load = pick(process.env.TELEGRAM_LOAD_CHAT_ID);
+  // src by SKY CHEATS. Copy right SKY CHEATS
+  if (load.length) return load;
+  return [process.env.TELEGRAM_CHAT_ID_1, process.env.TELEGRAM_CHAT_ID_2, process.env.TELEGRAM_CHAT_ID].filter(Boolean).map(String);
+}
+export const adminIds = () => String(process.env.TELEGRAM_TOPUP_ADMIN_IDS || '').split(',').map((x) => x.trim()).filter(Boolean);
+
+// src by SKY CHEATS. Copy right SKY CHEATS
+export function webhookSecret() {
+  return process.env.TELEGRAM_TOPUP_WEBHOOK_SECRET
+    || crypto.createHmac('sha256', botToken() || 'unset').update('topup-webhook').digest('hex').slice(0, 48);
+}
+export function safeEqual(a, b) {
+  // src by SKY CHEATS. Copy right SKY CHEATS
+  const x = Buffer.from(String(a)), y = Buffer.from(String(b));
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+
+export async function tg(method, body) {
+  // src by SKY CHEATS. Copy right SKY CHEATS
+  const token = botToken();
+  if (!token) return null;
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 7000);
+  try {
+    // src by SKY CHEATS. Copy right SKY CHEATS
+    const r = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: ctl.signal,
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.ok === false) console.warn(`[topup-bot] ${method} failed: ${j.description || r.status}`);
+    // src by SKY CHEATS. Copy right SKY CHEATS
+    return j;
+  } catch (e) {
+    console.warn(`[topup-bot] ${method} error: ${e?.name || 'unknown'}`);
+    return null;
+  } finally { clearTimeout(t); }
+// src by SKY CHEATS. Copy right SKY CHEATS
+}
+export const answerCallback = (id, text, alert = false) => tg('answerCallbackQuery', { callback_query_id: id, text, show_alert: alert });
+export const editMessage = (chat_id, message_id, text) =>
+  tg('editMessageText', { chat_id, message_id, text, parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: { inline_keyboard: [] } });
+
+// src by SKY CHEATS. Copy right SKY CHEATS
+export async function registerTopupWebhook() {
+  if (!botToken()) return;
+  const base = String(process.env.PUBLIC_BACKEND_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/+$/, '');
+  if (!base.startsWith('https://')) {
+    console.warn('[topup-bot] Set PUBLIC_BACKEND_URL (https) so the Load/Cancel buttons can reach the server.');
+    // src by SKY CHEATS. Copy right SKY CHEATS
+    return;
+  }
+  const r = await tg('setWebhook', {
+    url: `${base}/api/telegram/topup-webhook`, secret_token: webhookSecret(),
+    allowed_updates: ['callback_query', 'message'], drop_pending_updates: false,
+  // src by SKY CHEATS. Copy right SKY CHEATS
+  });
+  if (r?.ok) console.log('[topup-bot] webhook registered');
+  await tg('setMyCommands', { commands: [
+    { command: 'addbalance', description: 'Add balance to a user' },
+    { command: 'cutbalance', description: 'Cut balance from a user' },
+    { command: 'alluserbalance', description: 'Total balance + users holding balance' },
+    { command: 'allusers_list', description: 'Users who loaded balance / bought keys' },
+    { command: 'allrevenue', description: 'Total revenue and keys sold' },
+    { command: 'product_info', description: 'Prices for a product (any part of the name)' },
+    { command: 'ban', description: 'Ban a user' },
+    { command: 'unban', description: 'Unban a user' },
+    { command: 'removeallrestriction', description: 'Remove ALL restrictions (ban + fake-payment warning)' },
+    { command: 'annulment', description: 'Cancel a purchase and refund it' },
+    { command: 'notifytest', description: 'Test that every alert bot reaches you' },
+    { command: 'getdetail', description: 'Get a user\'s details' },
+    // src by SKY CHEATS. Copy right SKY CHEATS
+    { command: 'mode', description: 'Change mode: user / reseller / pro reseller' },
+    { command: 'cancel', description: 'Cancel the current command' },
+  ] });
+}
+
+// src by SKY CHEATS. Copy right SKY CHEATS
+const nrp = (n) => `NRP ${Number(n || 0).toLocaleString('en-US')}`;
+const LINE = '------------------------------------------';
+const THIN = '---------------------';
+
+export function buildRequestText(p, footer = '') {
+  // src by SKY CHEATS. Copy right SKY CHEATS
+  return [
+    `<b>USER NAME</b> - ${esc(p.name || '—')}`,
+    `<b>USER UID</b> - <code>${esc(p.uid)}</code>`,
+    `<b>GMAIL</b> - ${esc(p.email || '—')}`,
+    `<b>PHONE</b> - ${esc(p.phone || '—')}`,
+    // src by SKY CHEATS. Copy right SKY CHEATS
+    `<b>AVAILABLE BALANCE</b> - ${esc(nrp(p.balance))}`,
+    LINE,
+    `<b>REQUEST BALANCE</b> - <b>${esc(nrp(p.amount))}</b>`,
+    THIN,
+    `<b>TX CODE</b> - <code>${esc(p.txCode)}</code>`,
+    // src by SKY CHEATS. Copy right SKY CHEATS
+    THIN,
+    `<b>DATE</b> - ${esc(formatNepaliDateTime(p.date))}`,
+    `<b>IP ADDRESS</b> - <code>${esc(p.ip || '—')}</code>`,
+    LINE,
+    footer,
+  // src by SKY CHEATS. Copy right SKY CHEATS
+  ].filter((x) => x !== '').join('\n');
+}
+
+export async function sendRequestToBot(reqId, p) {
+  const ids = chatIds();
+  // src by SKY CHEATS. Copy right SKY CHEATS
+  if (!botToken() || !ids.length) {
+    console.warn('[topup-bot] TELEGRAM_TOPUP_AUTO_BOT / chat id not configured — request saved but not announced.');
+    return [];
+  }
+  const keyboard = { inline_keyboard: [[
+    // src by SKY CHEATS. Copy right SKY CHEATS
+    { text: 'Load', style: 'success', callback_data: `tq:L:${reqId}` },
+    { text: 'Cancel', style: 'danger', callback_data: `tq:C:${reqId}` },
+  ]] };
+  const sent = [];
+  await Promise.all(ids.map(async (chat_id) => {
+    // src by SKY CHEATS. Copy right SKY CHEATS
+    const r = await tg('sendMessage', { chat_id, text: buildRequestText(p, p.footer || ''), parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: keyboard });
+    if (r?.ok) sent.push({ chat_id: r.result.chat.id, message_id: r.result.message_id });
+  }));
+  return sent;
+}
+// src by SKY CHEATS. Copy right SKY CHEATS
+
+export function newReqId() { return crypto.randomBytes(6).toString('hex'); }
+
+export function isAllowedPress(cb) {
+  const chat = cb.message?.chat?.id;
+  // src by SKY CHEATS. Copy right SKY CHEATS
+  if (!chat || !chatIds().map(String).includes(String(chat))) return false;
+  const allow = adminIds();
+  return allow.length === 0 || allow.includes(String(cb.from?.id));
+}
+
+// src by SKY CHEATS. Copy right SKY CHEATS
+// eSewa transaction code: exactly 7 characters, CAPITAL letters + digits only, always starts with the number 1 (e.g. 1U7HMDY).
+// The rules are checked here on the server ONLY and are never described to the user: telling people the format
+// just teaches fakers how to build a code that passes. A code that fails is handled by autoRejectFake() below:
+// the user is told nothing, it is silently rejected + struck. (Only an EMPTY box gets a visible message.)
+const TX_CODE_RE = /^1[A-Z0-9]{6}$/;
+export const TX_CODE_REJECTED = 'Payment rejected: this transaction code is not valid. Send the exact code from your eSewa payment receipt.';
+// Returns { ok:true, txCode } or { ok:false, error, reason }. `reason` is for server logs only - never show it to the user.
+export function validateTxCode(raw) {
+  const t = String(raw ?? '').trim();
+  if (!t) return { ok: false, error: 'Enter your eSewa transaction code.', reason: 'empty' };
+  if (!TX_CODE_RE.test(t)) return { ok: false, error: TX_CODE_REJECTED, reason: 'format' };
+  return { ok: true, txCode: t };
+}
+
+export const FAKE_LADDER = [
+  { count: 1, action: 'warning', text: 'Warning 1/3 — fake payment detected. Next fake payment = 1 day ban.' },
+  { count: 2, action: '1d',      text: 'Warning 2/3 — fake payment detected again. You were banned for 1 day. Next fake payment = permanent ban.' },
+  { count: 3, action: 'permanent', text: 'Warning 3/3 — fake payment detected. Account permanently banned.' },
+];
+// src by SKY CHEATS. Copy right SKY CHEATS
+export const strikeStep = (count) => FAKE_LADDER[Math.min(count, FAKE_LADDER.length) - 1];
+
+// One fake-payment strike: bumps the counter, writes the warning text, bans on strike 2 / 3, logs it.
+// Used when an admin presses Cancel AND when a fake-format code is auto-rejected, so both behave the same.
+function strikeFields(d, txCode, now) {
+  const count = Number(d.fakePayment?.count || 0) + 1;
+  const step = strikeStep(count);
+  const upd = { fakePayment: { count, lastAt: now, lastTx: txCode, text: step.text } };
+  const log = [...(d.adminLog || []), { delta: 0, note: `Fake payment strike ${Math.min(count, 3)}/3 (txCode: ${txCode})`, resultingBalance: Number(d.balance || 0), at: now }];
+  if (step.action !== 'warning') {
+    upd.ban = makeBan(step.action, 'topup-auto');
+    upd.banned = true;
+    log.push({ delta: 0, note: `Auto-ban — ${upd.ban.label} (fake payment)`, resultingBalance: Number(d.balance || 0), at: now });
+  }
+  upd.adminLog = log;
+  return { upd, count, step };
+}
+
+export async function resolveRequest(reqId, decision, by = 'telegram') {
+  const idxRef = db().collection('topupQr').doc(reqId);
+  const idx = await idxRef.get();
+  // src by SKY CHEATS. Copy right SKY CHEATS
+  if (!idx.exists) return { ok: false, reason: 'Request not found' };
+  const { uid } = idx.data();
+  const userRef = db().collection('users').doc(uid);
+  const now = new Date().toISOString();
+
+  // src by SKY CHEATS. Copy right SKY CHEATS
+  const out = await db().runTransaction(async (tx) => {
+    const snap = await tx.get(userRef);
+    if (!snap.exists) return { ok: false, reason: 'User not found' };
+    const d = snap.data();
+    const list = Array.isArray(d.topupRequests) ? d.topupRequests : [];
+    // src by SKY CHEATS. Copy right SKY CHEATS
+    const i = list.findIndex((r) => r.reqId === reqId);
+    if (i < 0) return { ok: false, reason: 'Request not found' };
+    const r = list[i];
+    if (r.status !== 'PENDING') return { ok: false, reason: `Already ${r.status}`, status: r.status };
+
+    // src by SKY CHEATS. Copy right SKY CHEATS
+    const next = [...list];
+    const upd = {};
+    let result;
+    if (decision === 'load') {
+      const before = Number(d.balance || 0);
+      // src by SKY CHEATS. Copy right SKY CHEATS
+      const after = before + Number(r.amount || 0);
+      next[i] = { ...r, status: 'APPROVED', reviewedAt: now, reviewedBy: by };
+      upd.balance = after;
+      const pro = depositUpdate(d, r.amount, after, now);
+      Object.assign(upd, pro.fields);
+      // src by SKY CHEATS. Copy right SKY CHEATS
+      upd.adminLog = [...(d.adminLog || []), { delta: Number(r.amount), note: `QR top-up approved (txCode: ${r.txCode})`, resultingBalance: after, at: now }, ...pro.log];
+      result = { ok: true, decision, before, after, amount: Number(r.amount), txCode: r.txCode, proActivated: pro.activated };
+    } else {
+      const sk = strikeFields(d, r.txCode, now);
+      const { count, step } = sk;
+      next[i] = { ...r, status: 'REJECTED', reviewedAt: now, reviewedBy: by, fake: true };
+      Object.assign(upd, sk.upd);
+      result = { ok: true, decision, count, step, amount: Number(r.amount), txCode: r.txCode };
+    // src by SKY CHEATS. Copy right SKY CHEATS
+    }
+    upd.topupRequests = next;
+    tx.set(userRef, upd, { merge: true });
+    tx.set(idxRef, { status: next[i].status, resolvedAt: now }, { merge: true });
+    return result;
+  // src by SKY CHEATS. Copy right SKY CHEATS
+  });
+  if (out.ok) invalidateUserDoc(uid, { history: false });
+  return { ...out, uid, messages: idx.data().messages || [], base: idx.data() };
+}
+
+// A code that fails the format check (see validateTxCode) is NOT refused out loud. The user gets the exact same
+// "pending - verifying order" answer as a real payment, so they cannot learn the rule by trial. Behind the scenes
+// the request is marked REJECTED + fake and a strike is given, exactly like an admin pressing Cancel - but no admin
+// is bothered and nothing is announced. The website then shows the strike warning ~5 s later (see owner.php).
+async function autoRejectFake({ uid, email, amount, txCode, ip, source }) {
+  const shown = String(txCode ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 30) || '—';
+  const reqId = newReqId();
+  const userRef = db().collection('users').doc(uid);
+  const now = new Date().toISOString();
+  const out = await db().runTransaction(async (tx) => {
+    const u = await tx.get(userRef);
+    const d = u.exists ? u.data() : {};
+    const list = Array.isArray(d.topupRequests) ? d.topupRequests : [];
+    const sk = strikeFields(d, shown, now);
+    const entry = { date: now, amount, paymentAccount: 'QR (SKY CHEATS)', method: QR_METHOD, txCode: shown, status: 'REJECTED', uid, email: email || d.email || '', reqId, ip, reviewedAt: now, reviewedBy: 'auto-format-check', fake: true, ...(source !== 'website' ? { source } : {}) };
+    tx.set(userRef, { ...sk.upd, topupRequests: [...list, entry] }, { merge: true });
+    return sk;
+  });
+  invalidateUserDoc(uid, { history: false });
+  console.warn(`[topup-qr] auto-rejected fake tx code (uid ${uid}, strike ${Math.min(out.count, 3)}/3)`);
+  // looks identical to a normal submit; `autoRejected` is for the Telegram bot only and is never sent to the website
+  return { ok: true, reqId, status: 'PENDING', autoRejected: { count: out.count, step: out.step } };
+}
+
+// ---- shared by the website (/api/user/topup-qr) and the Telegram deposit bot --------------------
+// Creates a PENDING QR top-up for `uid`, then announces it to the admin bot with Load / Cancel buttons.
+// Returns { ok:true, reqId } or { ok:false, status, error }.
+export async function createQrTopup({ uid, email = '', amount, txCode, ip = '', source = 'website', extraIndex = {} }) {
+  amount = Number(amount);
+  if (!Number.isInteger(amount) || amount < QR_MIN_AMOUNT) return { ok: false, status: 400, error: `Minimum top-up is Rs ${QR_MIN_AMOUNT}` };
+  if (amount > QR_MAX_AMOUNT) return { ok: false, status: 400, error: 'Amount is too large' };
+  const txCheck = validateTxCode(txCode);
+  if (!txCheck.ok && txCheck.reason === 'empty') return { ok: false, status: 400, error: txCheck.error };
+  if (!txCheck.ok) return autoRejectFake({ uid, email, amount, txCode, ip, source });
+  txCode = txCheck.txCode;
+
+  const reqId = newReqId();
+  const userRef = db().collection('users').doc(uid);
+  const txRef = db().collection('topupTx').doc(txCode);
+  const idxRef = db().collection('topupQr').doc(reqId);
+  const date = new Date().toISOString();
+
+  let profile;
+  try {
+    profile = await db().runTransaction(async (tx) => {
+      const [u, used] = await Promise.all([tx.get(userRef), tx.get(txRef)]);
+      if (used.exists) throw new Error('This transaction ID was already submitted');
+      const d = u.exists ? u.data() : {};
+      const list = Array.isArray(d.topupRequests) ? d.topupRequests : [];
+      const recentCut = Date.now() - QR_PENDING_WINDOW_MS;
+      const recentPending = list.filter((t) => t.status === 'PENDING' && t.method === QR_METHOD && new Date(t.date).getTime() > recentCut);
+      if (recentPending.length >= QR_MAX_PENDING) {
+        const oldest = Math.min(...recentPending.map((t) => new Date(t.date).getTime()));
+        const mins = Math.max(1, Math.ceil((oldest + QR_PENDING_WINDOW_MS - Date.now()) / 60000));
+        throw new Error(`You already have ${recentPending.length} top-ups waiting to be checked. You can send a new one in about ${mins} min.`);
+      }
+      const entry = { date, amount, paymentAccount: 'QR (SKY CHEATS)', method: QR_METHOD, txCode, status: 'PENDING', uid, email: email || d.email || '', reqId, ip, ...(source !== 'website' ? { source } : {}) };
+      tx.set(userRef, { topupRequests: [...list, entry] }, { merge: true });
+      tx.set(txRef, { uid, reqId, at: date });
+      tx.set(idxRef, { uid, txCode, amount, status: 'PENDING', createdAt: date, messages: [], ...(source !== 'website' ? { source } : {}), ...extraIndex });
+      return d;
+    });
+  } catch (e) {
+    return { ok: false, status: 409, error: e.message };
+  }
+  invalidateUserDoc(uid, { history: false });
+
+  try {
+    const messages = await sendRequestToBot(reqId, {
+      name: profile.profileName || '', uid, email: profile.email || email, phone: profile.profilePhone || '',
+      balance: Number(profile.balance || 0), amount, txCode, date, ip,
+      footer: source === 'telegram' ? '<b>VIA</b> - Telegram deposit bot' : '',
+    });
+    if (messages.length) await idxRef.set({ messages }, { merge: true });
+  } catch (e) { console.warn('[topup-qr] announce failed:', e?.name || 'error'); }
+  return { ok: true, reqId, status: 'PENDING' };
+}

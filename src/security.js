@@ -1,0 +1,135 @@
+// src by SKY CHEATS. Copy right SKY CHEATS
+const buckets = new Map();
+const CLEANUP_EVERY_MS = 60_000;
+let lastCleanup = Date.now();
+
+// Behind Render the socket peer is a private 10.x proxy address, so Express' req.ip often ends up being that internal
+// address (every visitor looks the same: bad for alerts AND for the per-IP rate limits). When the direct peer is a
+// private/loopback address (= our own proxy, never a browser) we take the visitor's address from the proxy headers.
+const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+export function isPrivateIp(ip) {
+  const a = String(ip || '').replace(/^::ffff:/i, '').trim();
+  const m = IPV4.exec(a);
+  if (m) {
+    const [o1, o2] = [Number(m[1]), Number(m[2])];
+    return o1 === 10 || o1 === 127 || o1 === 0 || (o1 === 172 && o2 >= 16 && o2 <= 31) || (o1 === 192 && o2 === 168) || (o1 === 169 && o2 === 254) || (o1 === 100 && o2 >= 64 && o2 <= 127);
+  }
+  return a === '::1' || /^f[cd][0-9a-f]{2}:/i.test(a) || /^fe80:/i.test(a);
+}
+const looksLikeIp = (v) => typeof v === 'string' && v.length <= 45 && (IPV4.test(v) || /^[0-9a-f:]+$/i.test(v) && v.includes(':'));
+export function realClientIp(req) {
+  const peer = req.socket?.remoteAddress || '';
+  if (!isPrivateIp(peer)) return req.ip || peer || 'unknown';          // direct connection: nothing to trust but the socket
+  for (const h of ['cf-connecting-ip', 'true-client-ip']) {
+    const v = String(req.headers[h] || '').trim();
+    if (looksLikeIp(v) && !isPrivateIp(v)) return v;
+  }
+  const xff = String(req.headers['x-forwarded-for'] || '').split(',').map((x) => x.trim()).filter(Boolean);
+  for (let i = xff.length - 1; i >= 0; i--) if (looksLikeIp(xff[i]) && !isPrivateIp(xff[i])) return xff[i];   // right-most public hop
+  return req.ip || peer || 'unknown';
+}
+export function useRealClientIp(req, res, next) {
+  try { const ip = realClientIp(req); Object.defineProperty(req, 'ip', { value: ip, configurable: true, enumerable: true }); } catch (e) {}
+  next();
+}
+
+// src by SKY CHEATS. Copy right SKY CHEATS
+function clientKey(req) {
+  return req.ip || req.socket?.remoteAddress || 'unknown';
+}
+
+export function rateLimit({ windowMs = 60_000, max = 120, name = 'api', keyFn = null } = {}) {
+  // src by SKY CHEATS. Copy right SKY CHEATS
+  return (req, res, next) => {
+    const now = Date.now();
+    if (now - lastCleanup > CLEANUP_EVERY_MS) {
+      lastCleanup = now;
+      for (const [key, value] of buckets) {
+        // src by SKY CHEATS. Copy right SKY CHEATS
+        if (now - value.startedAt > value.windowMs) buckets.delete(key);
+      }
+    }
+
+    // keyFn lets a limiter bucket by authenticated user (req.uid) instead of IP; falls back to IP
+    const who = (keyFn && keyFn(req)) || clientKey(req);
+    const key = `${name}:${who}`;
+    // src by SKY CHEATS. Copy right SKY CHEATS
+    let item = buckets.get(key);
+    if (!item || now - item.startedAt >= windowMs) {
+      item = { startedAt: now, count: 0, windowMs };
+      buckets.set(key, item);
+    }
+// src by SKY CHEATS. Copy right SKY CHEATS
+
+    item.count += 1;
+    const remaining = Math.max(0, max - item.count);
+    res.setHeader('X-RateLimit-Limit', String(max));
+    res.setHeader('X-RateLimit-Remaining', String(remaining));
+// src by SKY CHEATS. Copy right SKY CHEATS
+
+    if (item.count > max) {
+      const retryAfter = Math.max(1, Math.ceil((windowMs - (now - item.startedAt)) / 1000));
+      res.setHeader('Retry-After', String(retryAfter));
+      return res.status(429).json({
+        // src by SKY CHEATS. Copy right SKY CHEATS
+        success: false,
+        error: 'Too many requests. Please wait a moment and try again.'
+      });
+    }
+
+    // src by SKY CHEATS. Copy right SKY CHEATS
+    next();
+  };
+}
+
+export function securityHeaders(req, res, next) {
+  // src by SKY CHEATS. Copy right SKY CHEATS
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  // src by SKY CHEATS. Copy right SKY CHEATS
+  if (req.path.startsWith('/api/')) {
+    res.setHeader('Cache-Control', 'no-store');
+  }
+  next();
+}
+// src by SKY CHEATS. Copy right SKY CHEATS
+
+// Removes secrets (bot tokens, API keys, bearer tokens) from anything that is about to be logged or sent to chat.
+const SECRET_PATTERNS = [
+  [/bot\d{6,}:[A-Za-z0-9_-]{20,}/g, 'bot<redacted>'],
+  [/\b\d{6,}:[A-Za-z0-9_-]{30,}\b/g, '<redacted-token>'],
+  [/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer <redacted>'],
+  [/(\b(?:key|token|api_key|secret)=)[^&\s"']+/gi, '$1<redacted>'],
+  [/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, '<redacted-jwt>'],
+];
+export function redact(value) {
+  let s = typeof value === 'string' ? value : (value && (value.stack || value.message)) || String(value ?? '');
+  for (const [re, rep] of SECRET_PATTERNS) s = s.replace(re, rep);
+  for (const k of ['TELEGRAM_TOPUP_AUTO_BOT', 'TELEGRAM_PUBLIC_BOT_TOKEN', 'TELEGRAM_BOT_TOKEN', 'IMGBB_API_KEY', 'ADMIN_SECRET', 'EMPLOYEE_SECRET', 'BREVO_API_KEY']) {
+    const v = process.env[k];
+    if (v && v.length > 8) s = s.split(v).join('<redacted>');
+  }
+  return s;
+}
+// Safe logger: one line, redacted, bounded. Never pass request bodies / tokens here.
+export function safeLog(tag, err) {
+  console.error(`[${tag}]`, redact(err).replace(/\s+/g, ' ').slice(0, 400));
+}
+
+// CSRF defence in depth for state-changing routes. Auth is a Bearer header (not a cookie), so classic CSRF cannot ride
+// on the browser's credentials; this additionally refuses browser requests from foreign origins and non-JSON bodies.
+// Requests with no Origin header (server-to-server, curl) still need a valid Firebase token.
+export function requireSameSiteWrite(isAllowedOrigin) {
+  return (req, res, next) => {
+    if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
+    const origin = req.headers.origin;
+    if (origin && !isAllowedOrigin(origin)) return res.status(403).json({ success: false, error: 'Origin not allowed.' });
+    if (req.headers['content-length'] !== '0' && req.headers['content-length'] !== undefined && !req.is('application/json')) {
+      return res.status(415).json({ success: false, error: 'Send JSON.' });
+    }
+    next();
+  };
+}
