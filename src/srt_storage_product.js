@@ -5,6 +5,7 @@ import { CATALOG_PRO } from './catalog3.js';
 import { db } from './firebase.js';
 // src by SKY CHEATS. Copy right SKY CHEATS
 import { cachedLoader, TTL } from './cache.js';
+import { DEFAULT_FEATURES } from './shopSrc.js';
 
 export { CATALOG, CATALOG_RESELLER, CATALOG_PRO };
 
@@ -159,7 +160,65 @@ export async function deleteCustomProduct(sku) {
   await db().collection('customProducts').doc(sku).delete();
   invalidateCustomProductCache();
 }
+// src by SKY CHEATS. Copy right SKY CHEATS
 
+const whatsappProducts = cachedLoader(async () => {
+  const snap = await db().collection('whatsappProducts').get();
+  const map = {};
+  snap.forEach((d) => { map[d.id] = d.data(); });
+  // src by SKY CHEATS. Copy right SKY CHEATS
+  return map;
+}, { ttlMs: TTL.catalog, name: 'whatsappProducts', versionKey: 'catalog' });
+
+function refreshWhatsappProducts() {
+  return whatsappProducts.get();
+// src by SKY CHEATS. Copy right SKY CHEATS
+}
+
+export function invalidateWhatsappProductCache() {
+  whatsappProducts.invalidate();
+}
+// src by SKY CHEATS. Copy right SKY CHEATS
+
+export async function getWhatsappProductRaw(id) {
+  const snap = await db().collection('whatsappProducts').doc(id).get();
+  return snap.exists ? snap.data() : null;
+}
+// src by SKY CHEATS. Copy right SKY CHEATS
+
+export async function deleteWhatsappProduct(id) {
+  await db().collection('whatsappProducts').doc(id).delete();
+  invalidateWhatsappProductCache();
+}
+// src by SKY CHEATS. Copy right SKY CHEATS
+
+
+// src by SKY CHEATS. Copy right SKY CHEATS
+// "Shop project" (store source code) products - own collection, own purchase flow (routes/shopsrc.js).
+const shopSrcProducts = cachedLoader(async () => {
+  const snap = await db().collection('shopSrcProducts').get();
+  const map = {};
+  snap.forEach((d) => { map[d.id] = d.data(); });
+  return map;
+}, { ttlMs: TTL.catalog, name: 'shopSrcProducts', versionKey: 'catalog' });
+
+export function invalidateShopSrcProductCache() {
+  shopSrcProducts.invalidate();
+}
+
+export async function getShopSrcProductRaw(id) {
+  const snap = await db().collection('shopSrcProducts').doc(id).get();
+  return snap.exists ? snap.data() : null;
+}
+
+export async function deleteShopSrcProduct(id) {
+  await db().collection('shopSrcProducts').doc(id).delete();
+  invalidateShopSrcProductCache();
+}
+
+// Products that are not sold from the manual key stock.
+export const STOCKLESS_TYPES = ['whatsapp', 'shopsrc', 'manual'];
+export const OUT_OF_STOCK_TEXT = 'This duration is out of stock.';
 
 export async function getLiveCatalog(role = 'user') {
   let base = { ...catalogForRole(role) };
@@ -173,39 +232,62 @@ export async function getLiveCatalog(role = 'user') {
   }
 // src by SKY CHEATS. Copy right SKY CHEATS
 
+  try {
+    const whatsapp = await refreshWhatsappProducts();
+    for (const [id, p] of Object.entries(whatsapp)) {
+      base[id] = { ...applyCustomRole(p, role), type: 'whatsapp', row: p.name, name: p.name };
+    // src by SKY CHEATS. Copy right SKY CHEATS
+    }
+  } catch (e) {
+    console.error('[catalog] whatsapp products unavailable:', e);
+  }
 
+  try {
+    const shop = await shopSrcProducts.get();
+    for (const [id, p] of Object.entries(shop)) {
+      base[id] = {
+        ...applyCustomRole(p, role), type: 'shopsrc', row: p.name, name: p.name, pinned: true,
+        features: Array.isArray(p.features) && p.features.length ? p.features : DEFAULT_FEATURES,
+      };
+    }
+  } catch (e) {
+    console.error('[catalog] shop-source products unavailable:', e);
+  }
 
   // src by SKY CHEATS. Copy right SKY CHEATS
-  let overrides;
+  let overrides = {};
   try {
     overrides = await getMaintenanceOverrides();
   } catch (e) {
     console.error('[catalog] maintenance override lookup failed — showing the catalog without overrides:', e);
-    // src by SKY CHEATS. Copy right SKY CHEATS
-    return applyRatings(base);
   }
-  if (Object.keys(overrides).length === 0) return applyRatings(base);
 
   const merged = { ...base };
-  // src by SKY CHEATS. Copy right SKY CHEATS
-  for (const sku of Object.keys(overrides)) {
-    if (!merged[sku]) continue;
+  for (const sku of Object.keys(merged)) {
     const o = overrides[sku];
-    merged[sku] = {
-      ...merged[sku],
-      // src by SKY CHEATS. Copy right SKY CHEATS
-      maintenance: !!o.maintenance,
-      maintenanceMessage: o.maintenance ? (o.maintenanceMessage || merged[sku].maintenanceMessage || 'This product is temporarily under maintenance.') : undefined,
-      outOfStock: !!o.outOfStock,
-      outOfStockMessage: o.outOfStock ? (o.outOfStockMessage || 'Out of stock — check back soon.') : undefined,
-      ...(o.image !== undefined ? { image: o.image } : {}),
-      // src by SKY CHEATS. Copy right SKY CHEATS
-      ...(o.name !== undefined ? { name: o.name } : {}),
-      ...(o.duration !== undefined ? { duration: o.duration } : {}),
-      ...(o.pid !== undefined ? { pid: o.pid } : {}),
-      ...(o.price !== undefined ? { price: tierPrice(o, role) } : {}),
-    };
-  // src by SKY CHEATS. Copy right SKY CHEATS
+    let p = merged[sku];
+    if (o) {
+      p = {
+        ...p,
+        maintenance: !!o.maintenance,
+        maintenanceMessage: o.maintenance ? (o.maintenanceMessage || p.maintenanceMessage || 'This product is temporarily under maintenance.') : undefined,
+        outOfStock: !!o.outOfStock,
+        outOfStockMessage: o.outOfStock ? (o.outOfStockMessage || 'Out of stock — check back soon.') : undefined,
+        ...(o.image !== undefined ? { image: o.image } : {}),
+        ...(o.name !== undefined ? { name: o.name } : {}),
+        ...(o.duration !== undefined ? { duration: o.duration } : {}),
+        ...(o.pid !== undefined ? { pid: o.pid } : {}),
+        ...(o.price !== undefined ? { price: tierPrice(o, role) } : {}),
+      };
+    }
+    // Manual key stock: every key-selling duration is out of stock when it has no keys left.
+    if (!STOCKLESS_TYPES.includes(p.type)) {
+      const n = Math.max(0, Math.floor(Number(o?.stockCount) || 0));
+      if (n <= 0 && !p.outOfStock) {
+        p = { ...p, outOfStock: true, outOfStockMessage: OUT_OF_STOCK_TEXT };
+      }
+    }
+    merged[sku] = p;
   }
   return applyRatings(merged);
 }
@@ -232,7 +314,7 @@ async function applyRatings(catalogObj) {
 // src by SKY CHEATS. Copy right SKY CHEATS
 export async function getMaintenanceForSku(sku) {
   const snap = await db().collection('productStatus').doc(sku).get();
-  if (!snap.exists) return { maintenance: false, outOfStock: false };
+  if (!snap.exists) return { maintenance: false, outOfStock: false, stockCount: 0 };
   const d = snap.data();
   return {
     // src by SKY CHEATS. Copy right SKY CHEATS
@@ -240,6 +322,7 @@ export async function getMaintenanceForSku(sku) {
     maintenanceMessage: d.maintenanceMessage || null,
     outOfStock: !!d.outOfStock,
     outOfStockMessage: d.outOfStockMessage || null,
+    stockCount: Math.max(0, Math.floor(Number(d.stockCount) || 0)),
   };
 // src by SKY CHEATS. Copy right SKY CHEATS
 }

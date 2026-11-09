@@ -16,6 +16,7 @@ const TOKEN_ENV = {
   health: ['TELEGRAM_HEALTH_BOT_TOKEN', 'TELEGRAM_USER_BOT_TOKEN'],
   report: ['TELEGRAM_REPORT_BOT_TOKEN', 'TELEGRAM_USER_BOT_TOKEN'],
   load: ['TELEGRAM_LOAD_BOT_TOKEN', 'TELEGRAM_BALANCE_BOT_TOKEN'],
+  stock: ['TELEGRAM_STOCK_BOT_TOKEN', 'TELEGRAM_USER_BOT_TOKEN'],
   legacy: ['TELEGRAM_BOT_TOKEN'],
 };
 const OWN_CHAT_ENV = {
@@ -23,8 +24,9 @@ const OWN_CHAT_ENV = {
   health: 'TELEGRAM_HEALTH_CHAT_ID',
   report: 'TELEGRAM_REPORT_CHAT_ID',
   load: 'TELEGRAM_LOAD_CHAT_ID',
+  stock: 'TELEGRAM_STOCK_CHAT_ID',
 };
-export const NOTIFY_PURPOSES = ['user', 'purchase', 'health', 'bug', 'balance', 'load', 'reseller', 'report'];
+export const NOTIFY_PURPOSES = ['user', 'purchase', 'health', 'bug', 'balance', 'load', 'reseller', 'report', 'stock'];
 
 const csv = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
 

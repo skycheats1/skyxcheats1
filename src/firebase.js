@@ -110,13 +110,13 @@ const csv = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolea
 
 const ALLOWED_ORIGIN_SUFFIXES = ['.onrender.com', ...csv(process.env.ALLOWED_ORIGIN_SUFFIXES)];
 const ALLOWED_EXACT_ORIGINS = [...new Set([
-  'https://bronzx.web.app',
+  'https://sky-cheats.web.app',
   // src by SKY CHEATS. Copy right SKY CHEATS
-  'https://bronzx.firebaseapp.com',
-  'https://userxcheats.ct.ws',
-  'https://userxcheats.ct.ws',
-  'https://userxcheats.ct.ws',
-  'https://userxcheats.ct.ws',
+  'https://sky-cheats.firebaseapp.com',
+  'https://sky cheats.ct.ws',
+  'https://sky cheats.ct.ws',
+  'https://sky cheats.ct.ws',
+  'https://sky cheats.ct.ws',
   // src by SKY CHEATS. Copy right SKY CHEATS
   ...csv(process.env.ALLOWED_ORIGINS),
 ])];
