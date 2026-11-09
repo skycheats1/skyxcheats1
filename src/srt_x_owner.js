@@ -6,8 +6,7 @@ import { db, requireAdmin, adminCors } from '../src/firebase.js';
 // src by SKY CHEATS. Copy right SKY CHEATS
 import { rateLimit } from '../src/security.js';
 import { cachedLoader } from '../src/cache.js';
-import { CATALOG, CATALOG_RESELLER, CATALOG_PRO, getMaintenanceOverrides, invalidateMaintenanceCache, getLiveCatalog, invalidateCustomProductCache, findCustomProductFresh, getCustomProductRaw, deleteCustomProduct, invalidateWhatsappProductCache, getWhatsappProductRaw, deleteWhatsappProduct, invalidateShopSrcProductCache, getShopSrcProductRaw, deleteShopSrcProduct } from '../src/srt_storage_product.js';
-import { parseFeatures, DEFAULT_FEATURES, STAGES, stageFields, timeline } from '../src/shopSrc.js';
+import { CATALOG, CATALOG_RESELLER, CATALOG_PRO, getMaintenanceOverrides, invalidateMaintenanceCache, getLiveCatalog, invalidateCustomProductCache, findCustomProductFresh, getCustomProductRaw, deleteCustomProduct } from '../src/srt_storage_product.js';
 import { telegramNotify, telegramFormat, esc } from '../src/telegram.js';
 import admin from 'firebase-admin';
 // src by SKY CHEATS. Copy right SKY CHEATS
@@ -331,7 +330,7 @@ router.get('/products', asyncHandler(async (req, res) => {
   // Fresh stock counts (the catalog cache only needs to know "zero or not").
   const stockCounts = {};
   statusSnap.forEach((d) => { stockCounts[d.id] = Math.max(0, Math.floor(Number(d.data().stockCount) || 0)); });
-  const skus = Object.keys(liveCatalog).filter((sku) => !['whatsapp', 'shopsrc'].includes(liveCatalog[sku].type));
+  const skus = Object.keys(liveCatalog);
 
   const products = skus.map((sku) => {
     const p = liveCatalog[sku];
@@ -487,7 +486,7 @@ async function skuExists(sku) {
   if (CATALOG[sku]) return true;
   const live = await getLiveCatalog('user');
   const p = live[sku];
-  return !!p && !['whatsapp', 'shopsrc', 'manual'].includes(p.type);
+  return !!p && p.type !== 'manual';
 }
 const stockFail = (res, e) => {
   if (e instanceof StockError) return res.status(e.status).json({ success: false, error: e.message });
@@ -601,207 +600,6 @@ router.post('/products/:sku/delete', asyncHandler(async (req, res) => {
   res.json({ success: true, sku });
 }));
 
-// src by SKY CHEATS. Copy right SKY CHEATS
-router.get('/products/whatsapp', asyncHandler(async (req, res) => {
-  const snap = await db().collection('whatsappProducts').get();
-  const products = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-  res.json({ success: true, products });
-}));
-// src by SKY CHEATS. Copy right SKY CHEATS
-
-router.post('/products/create-whatsapp', asyncHandler(async (req, res) => {
-  const image = String(req.body?.image || '').trim();
-  const name = String(req.body?.name || '').trim();
-  const price = Number(req.body?.price);
-  // src by SKY CHEATS. Copy right SKY CHEATS
-  const priceReseller = req.body?.priceReseller !== undefined && req.body?.priceReseller !== '' ? Number(req.body.priceReseller) : price;
-  const priceProReseller = req.body?.priceProReseller !== undefined && req.body?.priceProReseller !== '' ? Number(req.body.priceProReseller) : priceReseller;
-  const whatsappNumber = String(req.body?.whatsappNumber || '').replace(/[^\d]/g, '');
-  const whatsappMessage = String(req.body?.whatsappMessage || '').trim().slice(0, 400);
-  const viewDetails = String(req.body?.viewDetails || '').trim().slice(0, 1000);
-// src by SKY CHEATS. Copy right SKY CHEATS
-
-  if (!image) return res.status(400).json({ success: false, error: 'Image link is required' });
-  if (!name) return res.status(400).json({ success: false, error: 'Product name is required' });
-  if (!price || price <= 0) return res.status(400).json({ success: false, error: 'User price must be a positive number' });
-  if (!priceReseller || priceReseller <= 0) return res.status(400).json({ success: false, error: 'Reseller price must be a positive number' });
-  // src by SKY CHEATS. Copy right SKY CHEATS
-  if (!priceProReseller || priceProReseller <= 0) return res.status(400).json({ success: false, error: 'Pro reseller price must be a positive number' });
-  if (!whatsappNumber) return res.status(400).json({ success: false, error: 'WhatsApp number is required (digits only, with country code)' });
-
-  const id = `wa_${Date.now().toString(36)}`;
-  const product = { image, name, price, priceReseller, priceProReseller, whatsappNumber, whatsappMessage, viewDetails, createdAt: Date.now() };
-  // src by SKY CHEATS. Copy right SKY CHEATS
-  await db().collection('whatsappProducts').doc(id).set(product);
-  invalidateWhatsappProductCache();
-  res.json({ success: true, id, ...product });
-}));
-
-// src by SKY CHEATS. Copy right SKY CHEATS
-router.post('/products/whatsapp/:id/edit', asyncHandler(async (req, res) => {
-  const id = String(req.params.id || '').trim();
-  const existing = await getWhatsappProductRaw(id);
-  if (!existing) return res.status(404).json({ success: false, error: 'Unknown product' });
-
-  // src by SKY CHEATS. Copy right SKY CHEATS
-  const fields = {};
-  for (const key of ['image', 'name', 'whatsappMessage', 'viewDetails']) {
-    if (req.body?.[key] !== undefined) fields[key] = String(req.body[key]).trim();
-  }
-  if (req.body?.whatsappNumber !== undefined) {
-    // src by SKY CHEATS. Copy right SKY CHEATS
-    const v = String(req.body.whatsappNumber).replace(/[^\d]/g, '');
-    if (!v) return res.status(400).json({ success: false, error: 'WhatsApp number is required' });
-    fields.whatsappNumber = v;
-  }
-  if (req.body?.price !== undefined) {
-    // src by SKY CHEATS. Copy right SKY CHEATS
-    const v = Number(req.body.price);
-    if (!v || v <= 0) return res.status(400).json({ success: false, error: 'User price must be a positive number' });
-    fields.price = v;
-  }
-  if (req.body?.priceReseller !== undefined) {
-    // src by SKY CHEATS. Copy right SKY CHEATS
-    const v = Number(req.body.priceReseller);
-    if (!v || v <= 0) return res.status(400).json({ success: false, error: 'Reseller price must be a positive number' });
-    fields.priceReseller = v;
-  }
-  if (req.body?.priceProReseller !== undefined) {
-    // src by SKY CHEATS. Copy right SKY CHEATS
-    const v = Number(req.body.priceProReseller);
-    if (!v || v <= 0) return res.status(400).json({ success: false, error: 'Pro reseller price must be a positive number' });
-    fields.priceProReseller = v;
-  }
-  if (!Object.keys(fields).length) return res.status(400).json({ success: false, error: 'Nothing to update' });
-// src by SKY CHEATS. Copy right SKY CHEATS
-
-  await db().collection('whatsappProducts').doc(id).set(fields, { merge: true });
-  invalidateWhatsappProductCache();
-  res.json({ success: true, id, updated: fields });
-}));
-// src by SKY CHEATS. Copy right SKY CHEATS
-
-router.post('/products/whatsapp/:id/delete', asyncHandler(async (req, res) => {
-  const id = String(req.params.id || '').trim();
-  const existing = await getWhatsappProductRaw(id);
-  if (!existing) return res.status(404).json({ success: false, error: 'Unknown product' });
-  // src by SKY CHEATS. Copy right SKY CHEATS
-  await deleteWhatsappProduct(id);
-  res.json({ success: true, id });
-}));
-
-
-// src by SKY CHEATS. Copy right SKY CHEATS
-// ---- shop project (store source code) products ----
-router.get('/products/shopsrc', asyncHandler(async (req, res) => {
-  const snap = await db().collection('shopSrcProducts').get();
-  res.json({ success: true, products: snap.docs.map((d) => ({ id: d.id, ...d.data() })) });
-}));
-
-router.post('/products/create-shopsrc', asyncHandler(async (req, res) => {
-  const image = String(req.body?.image || '').trim();
-  const name = String(req.body?.name || '').trim().slice(0, 80);
-  const price = Number(req.body?.price);
-  const priceReseller = req.body?.priceReseller !== undefined && req.body?.priceReseller !== '' ? Number(req.body.priceReseller) : price;
-  const priceProReseller = req.body?.priceProReseller !== undefined && req.body?.priceProReseller !== '' ? Number(req.body.priceProReseller) : priceReseller;
-  const features = parseFeatures(req.body?.features);
-  if (!/^https:\/\//i.test(image)) return res.status(400).json({ success: false, error: 'Image link must start with https:// (postimage / imgbb link)' });
-  if (!name) return res.status(400).json({ success: false, error: 'Product name is required' });
-  for (const [label, v] of [['User', price], ['Reseller', priceReseller], ['Pro reseller', priceProReseller]]) {
-    if (!v || v <= 0) return res.status(400).json({ success: false, error: `${label} price must be a positive number` });
-  }
-  const id = `ss_${Date.now().toString(36)}`;
-  const product = { image, name, price, priceReseller, priceProReseller, features: features.length ? features : DEFAULT_FEATURES, createdAt: Date.now() };
-  await db().collection('shopSrcProducts').doc(id).set(product);
-  invalidateShopSrcProductCache();
-  res.json({ success: true, id, ...product });
-}));
-
-router.post('/products/shopsrc/:id/edit', asyncHandler(async (req, res) => {
-  const id = String(req.params.id || '').trim();
-  if (!(await getShopSrcProductRaw(id))) return res.status(404).json({ success: false, error: 'Unknown product' });
-  const fields = {};
-  if (req.body?.name !== undefined) { fields.name = String(req.body.name).trim().slice(0, 80); if (!fields.name) return res.status(400).json({ success: false, error: 'Name required' }); }
-  if (req.body?.image !== undefined) {
-    fields.image = String(req.body.image).trim();
-    if (!/^https:\/\//i.test(fields.image)) return res.status(400).json({ success: false, error: 'Image link must start with https://' });
-  }
-  for (const k of ['price', 'priceReseller', 'priceProReseller']) {
-    if (req.body?.[k] === undefined) continue;
-    const v = Number(req.body[k]);
-    if (!v || v <= 0) return res.status(400).json({ success: false, error: `${k} must be a positive number` });
-    fields[k] = v;
-  }
-  if (req.body?.features !== undefined) {
-    const f = parseFeatures(req.body.features);
-    if (!f.length) return res.status(400).json({ success: false, error: 'Add at least one detail line' });
-    fields.features = f;
-  }
-  if (!Object.keys(fields).length) return res.status(400).json({ success: false, error: 'Nothing to update' });
-  await db().collection('shopSrcProducts').doc(id).set(fields, { merge: true });
-  invalidateShopSrcProductCache();
-  res.json({ success: true, id, updated: fields });
-}));
-
-router.post('/products/shopsrc/:id/delete', asyncHandler(async (req, res) => {
-  const id = String(req.params.id || '').trim();
-  if (!(await getShopSrcProductRaw(id))) return res.status(404).json({ success: false, error: 'Unknown product' });
-  await deleteShopSrcProduct(id);
-  res.json({ success: true, id });
-}));
-
-
-// ---- shop-project ORDER TRACKING (admin moves each order through the stages) ----
-router.get('/shop-orders', asyncHandler(async (req, res) => {
-  const snap = await db().collection('shopOrders').orderBy('createdAt', 'desc').limit(100).get();
-  res.json({
-    success: true,
-    orders: snap.docs.map((d) => {
-      const o = d.data();
-      return {
-        id: d.id, uid: o.uid, email: o.email || '', buyerName: o.details?.name || '', productName: o.productName, price: o.price,
-        submitted: !!o.submitted, stageIndex: Number(o.stageIndex || 0), createdAt: o.createdAt || null,
-      };
-    }),
-  });
-}));
-
-router.get('/shop-orders/:id', asyncHandler(async (req, res) => {
-  const snap = await db().collection('shopOrders').doc(String(req.params.id)).get();
-  if (!snap.exists) return res.status(404).json({ success: false, error: 'Order not found' });
-  const o = snap.data();
-  res.json({ success: true, order: { id: snap.id, ...o, timeline: timeline(o) } });
-}));
-
-router.post('/shop-orders/:id/stage', asyncHandler(async (req, res) => {
-  const n = Number(req.body?.stage);
-  if (!Number.isInteger(n) || n < 0 || n > 5) return res.status(400).json({ success: false, error: 'Stage must be 0-5 (finish the order with "Send details")' });
-  const ref = db().collection('shopOrders').doc(String(req.params.id));
-  const snap = await ref.get();
-  if (!snap.exists) return res.status(404).json({ success: false, error: 'Order not found' });
-  const o = snap.data();
-  if (!o.submitted) return res.status(409).json({ success: false, error: 'The buyer has not submitted the form yet' });
-  const f = stageFields(o, n);
-  await ref.set(f, { merge: true });
-  res.json({ success: true, stageIndex: n, timeline: timeline({ ...o, ...f }) });
-}));
-
-router.post('/shop-orders/:id/deliver', asyncHandler(async (req, res) => {
-  const pick = (k, max) => String(req.body?.[k] ?? '').trim().slice(0, max);
-  const delivery = { storeLink: pick('storeLink', 300), adminLink: pick('adminLink', 300), unlockUrl: pick('unlockUrl', 300), password: pick('password', 200) };
-  for (const [k, v] of Object.entries(delivery)) {
-    if (!v) return res.status(400).json({ success: false, error: `${k} is required` });
-    if (k !== 'password' && !/^https?:\/\//i.test(v)) return res.status(400).json({ success: false, error: `${k} must start with http:// or https://` });
-  }
-  const ref = db().collection('shopOrders').doc(String(req.params.id));
-  const snap = await ref.get();
-  if (!snap.exists) return res.status(404).json({ success: false, error: 'Order not found' });
-  const o = snap.data();
-  if (!o.submitted) return res.status(409).json({ success: false, error: 'The buyer has not submitted the form yet' });
-  const f = stageFields(o, STAGES.length);
-  await ref.set({ ...f, delivery, deliveredAt: Date.now() }, { merge: true });
-  res.json({ success: true, stageIndex: STAGES.length });
-}));
 
 function generateRedeemCode() {
   // src by SKY CHEATS. Copy right SKY CHEATS

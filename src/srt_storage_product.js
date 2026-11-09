@@ -5,7 +5,6 @@ import { CATALOG_PRO } from './catalog3.js';
 import { db } from './firebase.js';
 // src by SKY CHEATS. Copy right SKY CHEATS
 import { cachedLoader, TTL } from './cache.js';
-import { DEFAULT_FEATURES } from './shopSrc.js';
 
 export { CATALOG, CATALOG_RESELLER, CATALOG_PRO };
 
@@ -162,62 +161,8 @@ export async function deleteCustomProduct(sku) {
 }
 // src by SKY CHEATS. Copy right SKY CHEATS
 
-const whatsappProducts = cachedLoader(async () => {
-  const snap = await db().collection('whatsappProducts').get();
-  const map = {};
-  snap.forEach((d) => { map[d.id] = d.data(); });
-  // src by SKY CHEATS. Copy right SKY CHEATS
-  return map;
-}, { ttlMs: TTL.catalog, name: 'whatsappProducts', versionKey: 'catalog' });
-
-function refreshWhatsappProducts() {
-  return whatsappProducts.get();
-// src by SKY CHEATS. Copy right SKY CHEATS
-}
-
-export function invalidateWhatsappProductCache() {
-  whatsappProducts.invalidate();
-}
-// src by SKY CHEATS. Copy right SKY CHEATS
-
-export async function getWhatsappProductRaw(id) {
-  const snap = await db().collection('whatsappProducts').doc(id).get();
-  return snap.exists ? snap.data() : null;
-}
-// src by SKY CHEATS. Copy right SKY CHEATS
-
-export async function deleteWhatsappProduct(id) {
-  await db().collection('whatsappProducts').doc(id).delete();
-  invalidateWhatsappProductCache();
-}
-// src by SKY CHEATS. Copy right SKY CHEATS
-
-
-// src by SKY CHEATS. Copy right SKY CHEATS
-// "Shop project" (store source code) products - own collection, own purchase flow (routes/shopsrc.js).
-const shopSrcProducts = cachedLoader(async () => {
-  const snap = await db().collection('shopSrcProducts').get();
-  const map = {};
-  snap.forEach((d) => { map[d.id] = d.data(); });
-  return map;
-}, { ttlMs: TTL.catalog, name: 'shopSrcProducts', versionKey: 'catalog' });
-
-export function invalidateShopSrcProductCache() {
-  shopSrcProducts.invalidate();
-}
-
-export async function getShopSrcProductRaw(id) {
-  const snap = await db().collection('shopSrcProducts').doc(id).get();
-  return snap.exists ? snap.data() : null;
-}
-
-export async function deleteShopSrcProduct(id) {
-  await db().collection('shopSrcProducts').doc(id).delete();
-  invalidateShopSrcProductCache();
-}
-
 // Products that are not sold from the manual key stock.
-export const STOCKLESS_TYPES = ['whatsapp', 'shopsrc', 'manual'];
+export const STOCKLESS_TYPES = ['manual'];
 export const OUT_OF_STOCK_TEXT = 'This duration is out of stock.';
 
 export async function getLiveCatalog(role = 'user') {
@@ -231,28 +176,6 @@ export async function getLiveCatalog(role = 'user') {
     console.error('[catalog] custom products unavailable, showing static catalog only:', e);
   }
 // src by SKY CHEATS. Copy right SKY CHEATS
-
-  try {
-    const whatsapp = await refreshWhatsappProducts();
-    for (const [id, p] of Object.entries(whatsapp)) {
-      base[id] = { ...applyCustomRole(p, role), type: 'whatsapp', row: p.name, name: p.name };
-    // src by SKY CHEATS. Copy right SKY CHEATS
-    }
-  } catch (e) {
-    console.error('[catalog] whatsapp products unavailable:', e);
-  }
-
-  try {
-    const shop = await shopSrcProducts.get();
-    for (const [id, p] of Object.entries(shop)) {
-      base[id] = {
-        ...applyCustomRole(p, role), type: 'shopsrc', row: p.name, name: p.name, pinned: true,
-        features: Array.isArray(p.features) && p.features.length ? p.features : DEFAULT_FEATURES,
-      };
-    }
-  } catch (e) {
-    console.error('[catalog] shop-source products unavailable:', e);
-  }
 
   // src by SKY CHEATS. Copy right SKY CHEATS
   let overrides = {};

@@ -113,10 +113,8 @@ const ALLOWED_EXACT_ORIGINS = [...new Set([
   'https://sky-cheats.web.app',
   // src by SKY CHEATS. Copy right SKY CHEATS
   'https://sky-cheats.firebaseapp.com',
-  'https://sky cheats.ct.ws',
-  'https://sky cheats.ct.ws',
-  'https://sky cheats.ct.ws',
-  'https://sky cheats.ct.ws',
+  'https://skycheats.ct.ws',
+  'https://www.skycheats.ct.ws',
   // src by SKY CHEATS. Copy right SKY CHEATS
   ...csv(process.env.ALLOWED_ORIGINS),
 ])];
