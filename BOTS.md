@@ -23,7 +23,7 @@ Also needed: `PUBLIC_BACKEND_URL` (https backend URL) for the two webhook bots.
 
 
 ## Deposit bot (#11) - "Deposit via Telegram"
-1. Create a bot in @BotFather, put its token in `TELEGRAM_DEPOSIT_BOT_TOKEN` (Render -> Environment). Also keep `PUBLIC_BACKEND_URL` and set `SITE_URL` (the PHP site, where `/assets/img/sky-pay-qr.jpg` lives). Optional: `TELEGRAM_DEPOSIT_BOT_USERNAME`, `DEPOSIT_QR_URL`.
+1. Create a bot in @BotFather, put its token in `TELEGRAM_DEPOSIT_BOT_TOKEN` (Render -> Environment). Also keep `PUBLIC_BACKEND_URL` and set `SITE_URL` (the PHP site, where `/assets/img/srtx-pay-qr.jpg` lives). Optional: `TELEGRAM_DEPOSIT_BOT_USERNAME`, `DEPOSIT_QR_URL`.
 2. User taps **Deposit via Telegram** on the website -> one-time link `t.me/<bot>?start=dep_<token>` (valid 15 min, tied to the logged-in account).
 3. Bot shows Uid / Email / Name / Number + "I want to get deposit balance", then the store QR ("Welcome to SKY CHEATS") and asks the amount.
 4. User sends the amount, then the eSewa transaction code. The bot never tells the user the code format; a fake-format code looks like a normal submit, then gets a strike 5 s later (see MEMORY.md).

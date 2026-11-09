@@ -28,7 +28,7 @@ Same names as before — Environment tab:
 | `RESELLER_WORKER_URL` | Only once you fill in `fetchRealKey()` |
 | `WORKER_INTERNAL_SECRET` | Same |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Optional — purchase/top-up notifications |
-| `PI_KEY` | Supplier product-feed key for the admin panel's **Auto add from supplier** (server side only). Optional `PI_ENDPOINT` overrides the default `https://repromax5.onrender.com/api/pi/v1` |
+| `TELEGRAM_STOCK_BOT_TOKEN` / `TELEGRAM_STOCK_CHAT_ID` | Optional. Bot + chat that receive the **"out of stock — add stock"** alerts. If not set, the purchase-log bot is used. |
 | `IMGBB_API_KEY` | Profile pictures — your key from https://api.imgbb.com/ (stays on the server, never sent to the browser) |
 | `IMGBB_ENDPOINT` | Optional — defaults to `https://api.imgbb.com/1/upload` |
 
@@ -181,3 +181,10 @@ API: `GET /api/support/overview`, `GET /api/support/tickets/:id`, `POST /api/sup
 * **PRO RESELLER** — needs **10+ keys bought** (`PRO_RESELLER_MIN_KEYS`) AND ONE new deposit of NRP **3500+** (`PRO_RESELLER_MIN_DEPOSIT`).
 * Deposits are never added together (100 + 200 + ... does not count) — each single deposit is checked on its own, whether it comes from QR, Telegram, admin, employee or the bot (`depositUpdate` in `src/proTier.js`).
 * Removed: Cashback missions, STAR cashback (`/api/rewards/claim-star`), the old "8 keys + NRP 1500 balance" apply button (`/api/user/apply-reseller`), and the Pro Reseller details form / Telegram approval flow.
+
+
+## Manual key stock (no supplier API)
+Keys are now added by hand in the admin panel (**Products → Add stock**). Each product duration (sku) has its own stock in `keyStock/{sku}`;
+the count is mirrored in `productStatus/{sku}.stockCount`. A purchase takes the money and the oldest key in one Firestore transaction.
+When the last key is sold the duration shows **"This duration is out of stock"** in the store and the Telegram bot tells the admin to add stock.
+The old reseller/supplier variables (`RESELLER_API_KEY`, `RESELLER_MASTER_KEY`, `PI_KEY`, ...) are no longer used and can be deleted.
