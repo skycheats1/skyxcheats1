@@ -108,7 +108,7 @@ FIREBASE_SERVICE_ACCOUNT_JSON='...' ADMIN_SECRET='test' PORT=8099 npm start
 ```
 
 Then in another terminal: `curl http://localhost:8099/` should return
-`{"ok":true,"service":"srtx-backend"}`.
+`{"ok":true,"service":"sky-backend"}`.
 
 ## Deploy
 
@@ -122,7 +122,7 @@ git branch -M main
 git push -u origin main --force
 ```
 
-Push to Render, watch Logs — should say `srtx-backend listening on
+Push to Render, watch Logs — should say `sky-backend listening on
 port ...` within seconds, not minutes. No gRPC compile step at all.
 
 

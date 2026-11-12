@@ -9,7 +9,7 @@ server.js                 app wiring, rate limit, health alerts, route mounting
 routes/
   purchase.js             /api/purchase  checkout job (balance tx → fetchRealKey → history)
   user.js auth.js         user profile, top-up requests, bug report
-  srt_x_owner.js          /api/admin  admin panel API (x-admin-secret)
+  sky_owner.js          /api/admin  admin panel API (x-admin-secret)
   employee.js reseller-*.js rewards.js gulaa_bot.js keys-lookup.js
   telegram-topup.js       /api/telegram/topup-webhook   (private bot)
   telegram-public.js      /api/telegram/public-webhook  (public bot)
@@ -23,7 +23,7 @@ src/
   topupQr.js              private bot transport (tg()), QR top-up approve/cancel
   adminDirectory.js       in-memory users directory (no extra Firestore reads)
   userCache.js versions.js cache.js  caching + change stamps
-  srt_storage_product.js  catalog (static + customProducts + whatsappProducts + overrides)
+  sky_storage_product.js  catalog (static + customProducts + whatsappProducts + overrides)
   proTier.js ban.js balanceAlerts.js firebase.js ...
 ```
 

@@ -1,7 +1,7 @@
 # src by SKY CHEATS. Copy right SKY CHEATS
 services:
   - type: web
-    name: srtx-backend
+    name: sky-backend
     runtime: node
     buildCommand: npm ci
     startCommand: npm start

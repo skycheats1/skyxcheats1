@@ -14,6 +14,6 @@ Website (`includes/.env`): unchanged (`BACKEND_URL`, `FIREBASE_*`). Add your sit
 ## Steps
 1. Backend: `npm install`, deploy, check the log for `[topup-bot] webhook registered`.
 2. Firestore: `firebase deploy --only firestore:rules,firestore:indexes` (rules are deny-all; the Admin SDK bypasses them). The index build takes a few minutes; listing works unordered meanwhile.
-3. Website: deploy `storesrt-main` (Docker rebuild picks up `security.conf`).
+3. Website: deploy `storesky-main` (Docker rebuild picks up `security.conf`).
 4. Test: log in, open /support.php, send a report -> message with [Send Message] [Send Photo] appears in the admin chat -> reply to the bot's prompt -> ticket shows Solved with the reply.
 5. Rotate any secret that was ever committed or logged.

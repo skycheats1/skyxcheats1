@@ -4,7 +4,7 @@ import express from 'express';
 import { getFirebaseApp } from './src/firebase.js';
 import { useRealClientIp, securityHeaders, rateLimit, redact } from './src/security.js';
 import { userCors } from './src/firebase.js';
-import { getLiveCatalog } from './src/srt_storage_product.js';
+import { getLiveCatalog } from './src/sky_storage_product.js';
 import { leaderboardCache } from './src/sharedCaches.js';
 import { asyncHandler } from './src/asyncHandler.js';
 import { startHealthMonitor } from './src/healthMonitor.js';
@@ -18,7 +18,7 @@ import purchaseRoutes from './routes/purchase.js';
 import rewardsRoutes from './routes/rewards.js';
 import supportRoutes from './routes/support.js';
 import gloryRoutes from './routes/gulaa_bot.js';
-import adminRoutes from './routes/srt_x_owner.js';
+import adminRoutes from './routes/sky_owner.js';
 import employeeRoutes from './routes/employee.js';
 import keysRoutes from './routes/keys-lookup.js';
 import topupWebhook from './routes/telegram-topup.js';
@@ -32,7 +32,7 @@ app.use(useRealClientIp);
 app.use(securityHeaders);
 
 // Health first: Render's health check must answer even if Firestore/env is misconfigured.
-const health = (_req, res) => res.json({ ok: true, service: 'srtx-backend' });
+const health = (_req, res) => res.json({ ok: true, service: 'sky-backend' });
 app.get('/', health);
 app.get('/health', health);
 app.get('/api/health', health);
@@ -81,7 +81,7 @@ process.on('uncaughtException', (e) => console.error('[uncaughtException]', reda
 // Bind the port FIRST (Render needs an open port quickly), then do the slow/optional startup work.
 const PORT = Number(process.env.PORT) || 10000;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`srtx-backend listening on port ${PORT}`);
+  console.log(`sky-backend listening on port ${PORT}`);
   try { getFirebaseApp(); console.log('[firebase] initialised'); }
   catch (e) { console.error('[firebase] NOT initialised:', e.message); }
   for (const [name, fn] of [['topup', registerTopupWebhook], ['public', registerPublicWebhook], ['deposit', registerDepositWebhook]]) {
