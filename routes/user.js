@@ -5,7 +5,7 @@ import { asyncHandler } from '../src/asyncHandler.js';
 import { db, requireFirebaseUid, userCors } from '../src/firebase.js';
 // src by SKY CHEATS. Copy right SKY CHEATS
 import { telegramNotify, telegramFormat, esc } from '../src/telegram.js';
-import { getLiveCatalog, getFeedbackList, recordFeedback } from '../src/sky_storage_product.js';
+import { getLiveCatalog, getFeedbackList, recordFeedback } from '../src/srt_storage_product.js';
 import { leaderboardCache, announcementCache } from '../src/sharedCaches.js';
 import { uploadAvatar } from '../src/imgbb.js';
 import { getVersions } from '../src/versions.js';
