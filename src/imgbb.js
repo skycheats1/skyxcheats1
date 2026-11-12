@@ -1,5 +1,37 @@
 // src by SKY CHEATS. Copy right SKY CHEATS
+import crypto from 'node:crypto';
+import { db } from './firebase.js';
+
 const MAX_BASE64_CHARS = 1_500_000;
+// Self-hosted fallback (used when ImgBB refuses us, e.g. "forbidden to use this website"):
+// the image is kept in Firestore (collection uploadedImages) and served by GET /img/:id on this backend.
+const MAX_SELF_HOST_BYTES = 900_000;   // Firestore documents are limited to 1 MiB
+
+function backendBase() {
+  return String(process.env.PUBLIC_BACKEND_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/+$/, '');
+}
+
+async function selfHostImage(b64) {
+  const base = backendBase();
+  if (!base) throw httpError(500, 'Image hosting is not configured (set PUBLIC_BACKEND_URL on the server).');
+  const buf = Buffer.from(b64, 'base64');
+  if (buf.length > MAX_SELF_HOST_BYTES) throw httpError(413, 'Image is too large. Pick a smaller size.');
+  const mime = buf[0] === 0x89 ? 'image/png' : buf[0] === 0xff ? 'image/jpeg' : 'image/webp';
+  const id = crypto.randomBytes(12).toString('hex');
+  await db().collection('uploadedImages').doc(id).set({ mime, data: buf, size: buf.length, createdAt: Date.now() });
+  return `${base}/img/${id}`;
+}
+
+export async function serveUploadedImage(req, res) {
+  const id = String(req.params.id || '');
+  if (!/^[a-f0-9]{24}$/.test(id)) return res.status(404).end();
+  const snap = await db().collection('uploadedImages').doc(id).get();
+  if (!snap.exists) return res.status(404).end();
+  const d = snap.data();
+  const data = Buffer.isBuffer(d.data) ? d.data : Buffer.from(d.data.toUint8Array ? d.data.toUint8Array() : d.data);
+  res.set({ 'Content-Type': d.mime, 'Cache-Control': 'public, max-age=31536000, immutable', 'Cross-Origin-Resource-Policy': 'cross-origin', 'Access-Control-Allow-Origin': '*' });
+  res.end(data);
+}
 
 function httpError(status, message) {
   const e = new Error(message);
@@ -31,11 +63,11 @@ function normalizeImage(input, maxChars = MAX_BASE64_CHARS) {
 
 export async function uploadImage(imageInput, namePrefix, { maxChars } = {}) {
   const key = process.env.IMGBB_API_KEY;
-  if (!key) throw httpError(500, 'Image upload is not configured (IMGBB_API_KEY missing on the server).');
   const endpoint = process.env.IMGBB_ENDPOINT || 'https://api.imgbb.com/1/upload';
 // src by SKY CHEATS. Copy right SKY CHEATS
 
   const image = normalizeImage(imageInput, maxChars || MAX_BASE64_CHARS);
+  if (!key || process.env.IMAGE_HOST === 'self') return selfHostImage(image);
 
   const body = new URLSearchParams();
   body.set('key', key);
@@ -54,7 +86,8 @@ export async function uploadImage(imageInput, namePrefix, { maxChars } = {}) {
     // src by SKY CHEATS. Copy right SKY CHEATS
     });
   } catch (e) {
-    throw httpError(504, e?.name === 'TimeoutError' ? 'Image host timed out. Please try again.' : 'Could not reach the image host. Please try again.');
+    console.error('[imgbb] unreachable, using self-host:', e?.message);
+    return selfHostImage(image);
   }
 
   // src by SKY CHEATS. Copy right SKY CHEATS
@@ -66,14 +99,14 @@ export async function uploadImage(imageInput, namePrefix, { maxChars } = {}) {
     // src by SKY CHEATS. Copy right SKY CHEATS
     const reason = json?.error?.message || json?.status_txt || `HTTP ${res.status}`;
     console.error('[imgbb] upload failed:', res.status, String(reason).slice(0, 200));
-    throw httpError(502, 'Image upload failed. Please try a different image or try again later.');
+    return selfHostImage(image);
   }
 
   // src by SKY CHEATS. Copy right SKY CHEATS
   const url = json?.data?.display_url || json?.data?.url;
   if (!url || !/^https:\/\//i.test(url)) {
     console.error('[imgbb] no usable URL in response');
-    throw httpError(502, 'Image host returned an unexpected response.');
+    return selfHostImage(image);
   }
   // src by SKY CHEATS. Copy right SKY CHEATS
   return url;
