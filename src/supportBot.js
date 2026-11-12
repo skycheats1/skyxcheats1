@@ -14,7 +14,7 @@ import { uploadImage } from './imgbb.js';
 import { redact } from './security.js';
 import { store, SupportError, TICKET_RE, REPLY_MAX } from './support.js';
 
-export const SUPPORT_CALLBACK_RE = /^sp:([MP]):(SKY_[A-Z0-9]{10})$/;
+export const SUPPORT_CALLBACK_RE = /^sp:([MP]):(SRT_X_[A-Z0-9]{10})$/;
 const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
 const IMAGE_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const who = (from) => (from?.username ? `@${from.username}` : String(from?.first_name || from?.id || 'admin'));

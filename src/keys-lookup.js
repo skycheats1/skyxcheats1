@@ -43,7 +43,7 @@ async function findUidByApiKey(apikey) {
 const router = express.Router();
 router.use(userCors);
 
-// GET /api/keys?apikey=sky_xxxxx
+// GET /api/keys?apikey=srtx_xxxxx
 //
 // Public, apikey-authenticated (not Firebase auth) — this is what
 // the "./api-keys" integration guide in the store points people at,

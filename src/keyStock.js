@@ -7,7 +7,7 @@
 // Every product + duration has its own sku, so every duration has its own stock.
 import admin from 'firebase-admin';
 import { db } from './firebase.js';
-import { invalidateMaintenanceCache } from './sky_storage_product.js';
+import { invalidateMaintenanceCache } from './srt_storage_product.js';
 import { telegramNotify, esc } from './telegram.js';
 
 export const MAX_KEYS_PER_ADD = 500;
