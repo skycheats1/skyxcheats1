@@ -29,7 +29,7 @@ export async function probe(name, fn) {
 }
 
 async function pingUrl(url) {
-  const r = await fetch(url, { signal: AbortSignal.timeout(15000), redirect: 'follow', headers: { 'User-Agent': 'srtx-health-monitor' } });
+  const r = await fetch(url, { signal: AbortSignal.timeout(15000), redirect: 'follow', headers: { 'User-Agent': 'sky-health-monitor' } });
   if (r.status >= 500) throw new Error(`HTTP ${r.status}`);
 }
 

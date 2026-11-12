@@ -1,7 +1,7 @@
 // Product lookup for the private bot (/product_info).
 // "PHANTOM" finds "PHANTOM X TROLL MODZ" and every other product whose name contains it,
 // and lists every duration with the User / Reseller / Pro Reseller price.
-import { getLiveCatalog } from './srt_storage_product.js';
+import { getLiveCatalog } from './sky_storage_product.js';
 import { esc } from './telegram.js';
 
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();

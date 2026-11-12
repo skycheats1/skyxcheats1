@@ -10,7 +10,7 @@ import { pipeline } from 'stream/promises';
 import admin from 'firebase-admin';
 import { asyncHandler } from '../src/asyncHandler.js';
 import { db, requireFirebaseUid, userCors } from '../src/firebase.js';
-import { getShopSrcProductRaw, getMaintenanceForSku } from '../src/srt_storage_product.js';
+import { getShopSrcProductRaw, getMaintenanceForSku } from '../src/sky_storage_product.js';
 import { telegramNotify, telegramFormat, esc, formatNepaliDateTime } from '../src/telegram.js';
 import { invalidateUserDoc } from '../src/userCache.js';
 import { leaderboardCache } from '../src/sharedCaches.js';
@@ -301,7 +301,7 @@ fileRouter.get('/download/:token', rateLimit({ windowMs: 60_000, max: 20, name: 
   }
 
   res.setHeader('Content-Type', 'application/octet-stream');
-  res.setHeader('Content-Disposition', `attachment; filename="${(process.env.SHOPSRC_FILE_NAME || 'srtx-shop-source.zip').replace(/[^\w.\-]/g, '_')}"`);
+  res.setHeader('Content-Disposition', `attachment; filename="${(process.env.SHOPSRC_FILE_NAME || 'sky-shop-source.zip').replace(/[^\w.\-]/g, '_')}"`);
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   if (src.length) res.setHeader('Content-Length', src.length);

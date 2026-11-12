@@ -2,7 +2,7 @@
 // Support tickets: pure data layer (Firestore). `getDb` is injected so the logic can be tested with a fake DB.
 //
 // Collections
-//   supportTickets/{ticketId}   the ticket (doc id == ticket id, e.g. SRT_X_AB12CD34EF)
+//   supportTickets/{ticketId}   the ticket (doc id == ticket id, e.g. SKY_AB12CD34EF)
 //   supportPending/{uid}        one doc per user that currently has a pending ticket (the concurrency lock)
 //   supportSessions/{chat_msg}  one doc per open Telegram "reply to this message" prompt (see supportBot.js)
 import crypto from 'node:crypto';
@@ -15,7 +15,7 @@ export const MAX_REPLIES = 20;
 export const MAX_IMAGES = 3;                                  // optional screenshots per report
 export const CANCEL_MAX = Number(process.env.SUPPORT_CANCEL_MAX) || 2;                       // cancels allowed per user ...
 export const CANCEL_WINDOW_MS = (Number(process.env.SUPPORT_CANCEL_WINDOW_HOURS) || 24) * 3_600_000;   // ... per rolling window
-export const TICKET_RE = /^SRT_X_[A-Z0-9]{10}$/;
+export const TICKET_RE = /^SKY_[A-Z0-9]{10}$/;
 const ID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I
 
 export class SupportError extends Error {
@@ -25,7 +25,7 @@ export class SupportError extends Error {
 export function newTicketId() {
   let s = '';
   for (let i = 0; i < 10; i++) s += ID_ALPHABET[crypto.randomInt(ID_ALPHABET.length)];
-  return `SRT_X_${s}`;
+  return `SKY_${s}`;
 }
 
 // Single place that cleans free text: NFC, no control chars, single-line collapse for the user's description.

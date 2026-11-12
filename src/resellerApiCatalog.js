@@ -1,8 +1,8 @@
 // src by SKY CHEATS. Copy right SKY CHEATS
 import { db } from './firebase.js';
-import { getMaintenanceOverrides, getCustomProductsCached } from './srt_storage_product.js';
+import { getMaintenanceOverrides, getCustomProductsCached } from './sky_storage_product.js';
 import { matchProduct, apiLabel } from './apiMatch.js';
-import { tierPrice } from './srt_storage_product.js';
+import { tierPrice } from './sky_storage_product.js';
 
 // src by SKY CHEATS. Copy right SKY CHEATS
 // Price for the caller's role: user -> price, reseller -> priceReseller, pro_reseller -> priceProReseller.
