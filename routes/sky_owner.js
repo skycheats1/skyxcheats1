@@ -40,6 +40,16 @@ const EMPTY_USER = (uid, email = '') => ({
 });
 // src by SKY CHEATS. Copy right SKY CHEATS
 
+// Product / catalog image upload used by the admin panel (image is already shrunk in the browser).
+router.post('/ff-image', asyncHandler(async (req, res) => {
+  try {
+    const url = await uploadImage(String(req.body?.image || ''), 'product');
+    res.json({ success: true, url });
+  } catch (e) {
+    res.status(e.status || 500).json({ success: false, error: e.message || 'Upload failed' });
+  }
+}));
+
 router.get('/lookup', asyncHandler(async (req, res) => {
   const uidParam = String(req.query.uid || '').trim();
   const emailParam = String(req.query.email || '').trim();
